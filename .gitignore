@@ -1,0 +1,91 @@
+# ─── Secrets & local config ───────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─── SQLite databases ─────────────────────────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+/server/data/
+
+# ─── Go (server/) ─────────────────────────────────────────────────────
+# Binary built by `go build` in server/
+/server/server
+/server/bin/
+*.exe
+*.test
+*.out
+coverage.*
+*.coverprofile
+go.work
+go.work.sum
+
+# ─── Flutter / Dart (mobile/) ─────────────────────────────────────────
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/mobile/build/
+/mobile/coverage/
+*.g.dart.bak
+.packages
+
+# Android
+/mobile/android/.gradle/
+/mobile/android/captures/
+/mobile/android/gradlew
+/mobile/android/gradlew.bat
+/mobile/android/local.properties
+/mobile/android/**/GeneratedPluginRegistrant.java
+/mobile/android/app/debug
+/mobile/android/app/profile
+/mobile/android/app/release
+/mobile/android/key.properties
+*.jks
+*.keystore
+
+# iOS / macOS
+/mobile/ios/Pods/
+/mobile/ios/.symlinks/
+/mobile/ios/Flutter/App.framework
+/mobile/ios/Flutter/Flutter.framework
+/mobile/ios/Flutter/Flutter.podspec
+/mobile/ios/Flutter/Generated.xcconfig
+/mobile/ios/Flutter/ephemeral/
+/mobile/ios/Flutter/app.flx
+/mobile/ios/Flutter/app.zip
+/mobile/ios/Flutter/flutter_assets/
+/mobile/ios/Flutter/flutter_export_environment.sh
+/mobile/ios/Runner/GeneratedPluginRegistrant.*
+/mobile/ios/ServiceDefinitions.json
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Firebase / signing config (if added later)
+google-services.json
+GoogleService-Info.plist
+
+# ─── Editors & OS ─────────────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# ─── Logs & temp ──────────────────────────────────────────────────────
+*.log
+tmp/

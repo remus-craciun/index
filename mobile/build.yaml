@@ -1,0 +1,25 @@
+targets:
+  $default:
+    builders:
+      # Drift emits a plain part file (app_database.drift.dart) instead of a
+      # shared .g.dart part. Riverpod providers expose Drift's generated row
+      # classes (TaskRow, ...), and a plain part can be generated before
+      # riverpod_generator runs; a shared part only exists after all builders.
+      drift_dev:
+        enabled: false
+      drift_dev:analyzer:
+        enabled: true
+        options: &drift_options
+          store_date_time_values_as_text: true
+          sql:
+            dialect: sqlite
+            options:
+              version: "3.45"
+      drift_dev:not_shared:
+        enabled: true
+        options: *drift_options
+
+global_options:
+  drift_dev:not_shared:
+    runs_before:
+      - riverpod_generator:riverpod_generator
