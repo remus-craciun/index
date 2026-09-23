@@ -33,6 +33,9 @@ class FakePublicApi extends PublicApi {
   @override
   Future<AuthTokens> login(String serverUrl, String email, String password) async =>
       const AuthTokens(accessToken: 'a', refreshToken: 'r');
+
+  @override
+  Future<void> logout(String serverUrl, String refreshToken) async => calls.add('logout $refreshToken');
 }
 
 /// Routes Dio requests to [FakeSyncServer] without real networking.
@@ -156,6 +159,18 @@ void main() {
     await tester.tap(find.text('Today'));
     await tester.pumpAndSettle();
     expect(find.text('Stretch'), findsOneWidget);
+
+    // Signing out ends the session on the server and returns to login.
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Sign out'), 200);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sign out'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Sign out'));
+    await tester.pumpAndSettle();
+    expect(public.calls, contains('logout r'));
+    expect(find.text('Welcome back'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 1));

@@ -51,7 +51,7 @@ func (s *Service) Register(ctx context.Context, email, password string) (auth.To
 	if err != nil {
 		return auth.Tokens{}, err
 	}
-	return s.tokens.Issue(id)
+	return s.startSession(ctx, id)
 }
 
 // Login verifies credentials and issues tokens.
@@ -63,12 +63,14 @@ func (s *Service) Login(ctx context.Context, email, password string) (auth.Token
 	if !auth.CheckPassword(u.HashedPassword, password) {
 		return auth.Tokens{}, ErrInvalidCredentials
 	}
-	return s.tokens.Issue(u.ID)
+	return s.startSession(ctx, u.ID)
 }
 
-// Refresh exchanges a valid refresh token for a new token pair.
+// Refresh exchanges a valid refresh token for a new token pair in the same
+// session. Refresh tokens don't expire (unless REFRESH_TTL is set); they
+// stop working when their session is revoked by Logout.
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (auth.Tokens, error) {
-	userID, err := s.tokens.VerifyRefresh(refreshToken)
+	userID, sessionID, err := s.tokens.VerifyRefresh(refreshToken)
 	if err != nil {
 		return auth.Tokens{}, ErrUnauthorized
 	}
@@ -78,5 +80,40 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (auth.Tokens
 		}
 		return auth.Tokens{}, err
 	}
-	return s.tokens.Issue(userID)
+	if sessionID == "" {
+		// Issued before sessions existed (and still within its old expiry):
+		// move it onto a permanent session instead of logging the user out.
+		return s.startSession(ctx, userID)
+	}
+	if _, err := s.store.GetActiveSession(ctx, sqlcgen.GetActiveSessionParams{ID: sessionID, UserID: userID}); err != nil {
+		if db.IsNotFound(err) {
+			return auth.Tokens{}, ErrUnauthorized
+		}
+		return auth.Tokens{}, err
+	}
+	if err := s.store.TouchSession(ctx, sqlcgen.TouchSessionParams{ID: sessionID, Now: s.nowString()}); err != nil {
+		return auth.Tokens{}, err
+	}
+	return s.tokens.Issue(userID, sessionID)
+}
+
+// Logout revokes the session behind refreshToken. It is idempotent: an
+// unknown, already revoked or invalid token is not an error, since the goal
+// (that token no longer working) is met either way.
+func (s *Service) Logout(ctx context.Context, refreshToken string) error {
+	userID, sessionID, err := s.tokens.VerifyRefresh(refreshToken)
+	if err != nil || sessionID == "" {
+		return nil
+	}
+	now := s.nowString()
+	_, err = s.store.RevokeSession(ctx, sqlcgen.RevokeSessionParams{ID: sessionID, UserID: userID, Now: &now})
+	return err
+}
+
+func (s *Service) startSession(ctx context.Context, userID string) (auth.Tokens, error) {
+	sessionID := uuid.Must(uuid.NewV7()).String()
+	if err := s.store.CreateSession(ctx, sqlcgen.CreateSessionParams{ID: sessionID, UserID: userID, Now: s.nowString()}); err != nil {
+		return auth.Tokens{}, err
+	}
+	return s.tokens.Issue(userID, sessionID)
 }

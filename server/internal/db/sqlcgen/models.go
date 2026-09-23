@@ -52,6 +52,14 @@ type Recurrence struct {
 	ServerRev        int64
 }
 
+type Session struct {
+	ID         string
+	UserID     string
+	CreatedAt  string
+	LastUsedAt string
+	RevokedAt  *string
+}
+
 type SyncState struct {
 	ID  int64
 	Rev int64

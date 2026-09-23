@@ -21,6 +21,7 @@ class RoutinesScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Routines')),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'routines-new',
         onPressed: () => _open(context),
         icon: const Icon(Icons.add),
         label: const Text('New routine'),

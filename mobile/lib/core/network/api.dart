@@ -48,6 +48,19 @@ class PublicApi {
         return AuthTokens.fromJson(res.data!);
       });
 
+  /// Ends the server-side session behind [refreshToken]. Best effort: a
+  /// failure (e.g. offline) is ignored, since signing out must always work
+  /// locally.
+  Future<void> logout(String serverUrl, String refreshToken) async {
+    try {
+      await _dio.post<void>(
+        '$serverUrl/api/v1/auth/logout',
+        data: {'refresh_token': refreshToken},
+        options: Options(sendTimeout: const Duration(seconds: 5), receiveTimeout: const Duration(seconds: 5)),
+      );
+    } catch (_) {}
+  }
+
   /// Throws the raw [DioException] so the auth interceptor can inspect it.
   Future<AuthTokens> refresh(String serverUrl, String refreshToken) async {
     final res = await _dio.post<Map<String, dynamic>>('$serverUrl/api/v1/auth/refresh',

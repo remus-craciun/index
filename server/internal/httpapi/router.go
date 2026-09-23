@@ -47,6 +47,7 @@ func NewRouter(svc *service.Service, tokens *auth.Issuer, corsOrigins []string, 
 			r.Post("/auth/register", a.register)
 			r.Post("/auth/login", a.login)
 			r.Post("/auth/refresh", a.refresh)
+			r.Post("/auth/logout", a.logout)
 		})
 
 		r.Group(func(r chi.Router) {

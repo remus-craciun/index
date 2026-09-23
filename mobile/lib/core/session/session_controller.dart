@@ -88,18 +88,34 @@ class SessionController extends _$SessionController {
     state = AsyncData(session.copyWith(hasUser: hasUser));
   }
 
-  /// Local data is kept so unsynced edits survive until the next login.
+  /// Ends the session on the server (refresh tokens never expire, so this
+  /// is what invalidates them) and forgets the tokens. Local data is kept so
+  /// unsynced edits survive until the next login.
   Future<void> logout() async {
+    await _endServerSession();
     await ref.read(tokenStoreProvider).clear();
     final s = state.value;
     if (s != null) state = AsyncData(s.copyWith(authenticated: false, hasUser: true));
   }
 
-  void sessionExpired() => logout();
+  /// The server rejected the refresh token (session revoked): just forget
+  /// the tokens, there is no session left to end.
+  Future<void> sessionExpired() async {
+    await ref.read(tokenStoreProvider).clear();
+    final s = state.value;
+    if (s != null) state = AsyncData(s.copyWith(authenticated: false, hasUser: true));
+  }
+
+  Future<void> _endServerSession() async {
+    final url = state.value?.serverUrl;
+    final tokens = await ref.read(tokenStoreProvider).read();
+    if (url != null && tokens != null) await ref.read(publicApiProvider).logout(url, tokens.refreshToken);
+  }
 
   /// Forgets the server address and returns to setup. Local data is only
   /// wiped if a different server is connected afterwards.
   Future<void> changeServer() async {
+    await _endServerSession();
     await ref.read(tokenStoreProvider).clear();
     await ref.read(sharedPreferencesProvider).remove(_serverKey);
     state = const AsyncData(Session());

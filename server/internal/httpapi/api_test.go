@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
 	"github.com/remus-craciun/index/server/internal/ai"
@@ -21,6 +22,8 @@ import (
 	"github.com/remus-craciun/index/server/internal/httpapi"
 	"github.com/remus-craciun/index/server/internal/service"
 )
+
+const testSecret = "0123456789abcdef0123456789abcdef"
 
 type fakePlanner struct {
 	plan     ai.PlanDraft
@@ -60,7 +63,7 @@ func newServer(t *testing.T, planner ai.Planner) *client {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	tokens := auth.NewIssuer([]byte("0123456789abcdef0123456789abcdef"), time.Minute, time.Hour)
+	tokens := auth.NewIssuer([]byte(testSecret), time.Minute, 0)
 	svc := service.New(store, tokens, planner)
 	log := slog.New(slog.NewTextHandler(testWriter{t}, nil))
 	srv := httptest.NewServer(httpapi.NewRouter(svc, tokens, []string{"*"}, log))
@@ -608,5 +611,57 @@ func TestRevisePlan(t *testing.T) {
 	}
 	if !stillThere {
 		t.Fatal("completed task was removed by a revision")
+	}
+}
+
+func TestSessions(t *testing.T) {
+	c := newServer(t, nil)
+	var phone, laptop auth.Tokens
+	c.do("POST", "/auth/register", map[string]string{"email": "me@example.com", "password": "correct horse"}, 201, &phone)
+	c.do("POST", "/auth/login", map[string]string{"email": "me@example.com", "password": "correct horse"}, 200, &laptop)
+
+	// Refresh tokens carry no expiry.
+	var claims jwt.RegisteredClaims
+	if _, _, err := jwt.NewParser().ParseUnverified(phone.RefreshToken, &claims); err != nil || claims.ExpiresAt != nil {
+		t.Fatalf("refresh token should not expire: exp=%v err=%v", claims.ExpiresAt, err)
+	}
+
+	// Refreshing keeps working, and the new refresh token works too.
+	var next auth.Tokens
+	c.do("POST", "/auth/refresh", map[string]string{"refresh_token": phone.RefreshToken}, 200, &next)
+	c.do("POST", "/auth/refresh", map[string]string{"refresh_token": next.RefreshToken}, 200, nil)
+
+	// Logging out the phone revokes that session only, including older
+	// refresh tokens of the same session.
+	c.do("POST", "/auth/logout", map[string]string{"refresh_token": next.RefreshToken}, 204, nil)
+	c.do("POST", "/auth/refresh", map[string]string{"refresh_token": next.RefreshToken}, 401, nil)
+	c.do("POST", "/auth/refresh", map[string]string{"refresh_token": phone.RefreshToken}, 401, nil)
+	c.do("POST", "/auth/refresh", map[string]string{"refresh_token": laptop.RefreshToken}, 200, nil)
+
+	// Logout is idempotent and tolerates junk.
+	c.do("POST", "/auth/logout", map[string]string{"refresh_token": next.RefreshToken}, 204, nil)
+	c.do("POST", "/auth/logout", map[string]string{"refresh_token": "garbage"}, 204, nil)
+
+	// A refresh token from before sessions existed (no sid, 30-day expiry)
+	// still refreshes and is moved onto a permanent session.
+	sub := func(tok string) string {
+		var rc jwt.RegisteredClaims
+		jwt.NewParser().ParseUnverified(tok, &rc)
+		return rc.Subject
+	}
+	legacy := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"typ": "refresh", "iss": "index", "sub": sub(laptop.AccessToken),
+		"iat": time.Now().Unix(), "exp": time.Now().Add(30 * 24 * time.Hour).Unix(),
+	})
+	legacyToken, _ := legacy.SignedString([]byte(testSecret))
+	var migrated auth.Tokens
+	c.do("POST", "/auth/refresh", map[string]string{"refresh_token": legacyToken}, 200, &migrated)
+	var mc struct {
+		Sid string `json:"sid"`
+		jwt.RegisteredClaims
+	}
+	jwt.NewParser().ParseUnverified(migrated.RefreshToken, &mc)
+	if mc.Sid == "" || mc.ExpiresAt != nil {
+		t.Fatalf("legacy token should move to a permanent session: sid=%q exp=%v", mc.Sid, mc.ExpiresAt)
 	}
 }

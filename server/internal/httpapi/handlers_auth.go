@@ -59,3 +59,18 @@ func (a *api) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, tokens)
 }
+
+func (a *api) logout(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := decodeJSON(w, r, defaultBodyLimit, &in); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	if err := a.svc.Logout(r.Context(), in.RefreshToken); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -30,7 +30,7 @@ go tool sqlc generate
 | `GEMINI_API_KEY` | – | Optional; AI endpoints return 503 without it |
 | `GEMINI_MODEL` | `gemini-flash-latest` | Any Gemini model that supports structured output |
 | `CORS_ORIGINS` | `*` | Comma-separated |
-| `ACCESS_TTL` / `REFRESH_TTL` | `15m` / `720h` | Go duration syntax |
+| `ACCESS_TTL` / `REFRESH_TTL` | `15m` / `0` | Go duration syntax. `REFRESH_TTL=0` means refresh tokens never expire |
 
 ## Deploying on Coolify (Railpack)
 
@@ -49,6 +49,7 @@ There is exactly one account.
 - `GET /api/v1/auth/status` returns `{"has_user": bool}`. The app calls it after the user enters the server address, then shows the registration screen if it's `false` and the login screen if it's `true`.
 - `POST /auth/register` only works while no user exists. After that it returns `403 registration_disabled`.
 - Login and register return `{access_token, refresh_token, token_type, expires_in}`. Send the access token as `Authorization: Bearer <token>`. When it expires, exchange the refresh token at `POST /auth/refresh`.
+- Each login creates a **session** on the server. Refresh tokens carry the session ID and don't expire (unless `REFRESH_TTL` is set), so a login lasts until you sign out. `POST /auth/logout {refresh_token}` revokes the session, and its refresh tokens stop working everywhere. Logout always returns 204.
 
 ## API (`/api/v1`, bearer auth unless noted)
 
@@ -56,7 +57,7 @@ There is exactly one account.
 |---|---|---|
 | GET | `/health` | Public. Returns `{status, database, time}`, or 503 if the DB is down. Also served at `/health` and `/healthz`. |
 | GET | `/auth/status` | public |
-| POST | `/auth/register`, `/auth/login`, `/auth/refresh` | public |
+| POST | `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout` | public |
 | GET, POST | `/plans` | |
 | GET, PATCH, DELETE | `/plans/{id}` | GET returns milestones and tasks nested. DELETE cascades to them. |
 | POST | `/plans/{id}/milestones` | |

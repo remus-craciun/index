@@ -60,6 +60,7 @@ class PlansScreen extends ConsumerWidget {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'plans-new',
         onPressed: () => _newPlan(context, ref),
         icon: const Icon(Icons.add),
         label: const Text('New plan'),

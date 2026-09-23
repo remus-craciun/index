@@ -68,7 +68,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
           const SyncIndicator(),
         ],
       ),
-      floatingActionButton: FloatingActionButton(onPressed: _addTask, tooltip: 'Add task on this day', child: const Icon(Icons.add)),
+      floatingActionButton: FloatingActionButton(heroTag: 'calendar-add', onPressed: _addTask, tooltip: 'Add task on this day', child: const Icon(Icons.add)),
       body: Column(
         children: [
           TableCalendar<Object>(

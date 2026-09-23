@@ -43,7 +43,8 @@ func Load() (Config, error) {
 	if c.AccessTTL, err = duration("ACCESS_TTL", 15*time.Minute); err != nil {
 		return c, err
 	}
-	if c.RefreshTTL, err = duration("REFRESH_TTL", 30*24*time.Hour); err != nil {
+	// 0 (the default) means refresh tokens never expire; sessions end on logout.
+	if c.RefreshTTL, err = duration("REFRESH_TTL", 0); err != nil {
 		return c, err
 	}
 	if len(c.JWTSecret) < 32 {
