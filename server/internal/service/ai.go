@@ -21,6 +21,7 @@ type DecomposeInput struct {
 	StartDate     *string `json:"start_date"`
 	TargetDate    *string `json:"target_date"`
 	MinutesPerDay *int    `json:"minutes_per_day"`
+	Weekdays      *int    `json:"weekdays"` // bitmask, Monday = 1 … Sunday = 64; omitted means every day
 }
 
 // DecomposePlan asks the planner for a curriculum, schedules its tasks
@@ -62,9 +63,16 @@ func (s *Service) DecomposePlan(ctx context.Context, userID string, in Decompose
 	if perDay < 10 || perDay > 600 {
 		return PlanDetail{}, invalid("minutes_per_day must be between 10 and 600")
 	}
+	weekdays := ai.AllWeekdays
+	if in.Weekdays != nil {
+		weekdays = *in.Weekdays
+	}
+	if weekdays < 1 || weekdays > ai.AllWeekdays {
+		return PlanDetail{}, invalid("weekdays must be a bitmask between 1 and 127")
+	}
 
 	draft, err := s.planner.DecomposePlan(ctx, ai.DecomposeRequest{
-		Prompt: prompt, StartDate: startStr, TargetDate: target, MinutesPerDay: perDay,
+		Prompt: prompt, StartDate: startStr, TargetDate: target, MinutesPerDay: perDay, Weekdays: weekdays,
 	})
 	if err != nil {
 		return PlanDetail{}, err
@@ -76,7 +84,7 @@ func (s *Service) DecomposePlan(ctx context.Context, userID string, in Decompose
 			minutes = append(minutes, t.EstimatedMinutes)
 		}
 	}
-	dates := ai.Schedule(start, perDay, minutes)
+	dates := ai.Schedule(start, perDay, minutes, weekdays)
 	if target == "" && len(dates) > 0 {
 		target = timeutil.FormatDate(dates[len(dates)-1])
 	}

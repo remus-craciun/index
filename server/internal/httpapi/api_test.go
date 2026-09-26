@@ -323,7 +323,7 @@ func TestAIDecomposeAndBreakdown(t *testing.T) {
 	c.do("POST", "/ai/decompose-plan", map[string]any{
 		"prompt": "Learn distributed systems in Go", "start_date": "2026-03-02", "minutes_per_day": 60,
 	}, 201, &plan)
-	if fp.gotReq.MinutesPerDay != 60 || fp.gotReq.StartDate != "2026-03-02" {
+	if fp.gotReq.MinutesPerDay != 60 || fp.gotReq.StartDate != "2026-03-02" || fp.gotReq.Weekdays != ai.AllWeekdays {
 		t.Fatalf("planner request: %+v", fp.gotReq)
 	}
 	if len(plan.Milestones) != 2 || plan.Milestones[0].Title != "Phase 1" {
@@ -347,6 +347,20 @@ func TestAIDecomposeAndBreakdown(t *testing.T) {
 	}
 	c.do("PATCH", "/tasks/"+raft.ID, map[string]any{"title": "x"}, 404, nil)
 	c.do("POST", "/ai/breakdown-task", map[string]any{"task_id": raft.ID}, 404, nil)
+
+	// Wednesday only: the two 30-minute tasks share 2026-03-04, Raft waits a week.
+	var wed service.PlanDetail
+	c.do("POST", "/ai/decompose-plan", map[string]any{
+		"prompt": "Learn distributed systems in Go", "start_date": "2026-03-02", "minutes_per_day": 60, "weekdays": 4,
+	}, 201, &wed)
+	if fp.gotReq.Weekdays != 4 {
+		t.Fatalf("weekdays not forwarded: %+v", fp.gotReq)
+	}
+	w1, w2 := wed.Milestones[0].Tasks, wed.Milestones[1].Tasks
+	if *w1[0].ScheduledDate != "2026-03-04" || *w1[1].ScheduledDate != "2026-03-04" || *w2[0].ScheduledDate != "2026-03-11" {
+		t.Fatalf("weekday scheduling wrong: %s %s %s", *w1[0].ScheduledDate, *w1[1].ScheduledDate, *w2[0].ScheduledDate)
+	}
+	c.do("POST", "/ai/decompose-plan", map[string]any{"prompt": "x", "weekdays": 0}, 400, nil)
 }
 
 func TestAIDisabled(t *testing.T) {

@@ -113,6 +113,7 @@ class Api {
     required String startDate,
     String? targetDate,
     required int minutesPerDay,
+    int weekdays = 127,
   }) =>
       _call(() async {
         final res = await _dio.post<Map<String, dynamic>>(
@@ -122,6 +123,7 @@ class Api {
             'start_date': startDate,
             'target_date': ?targetDate,
             'minutes_per_day': minutesPerDay,
+            'weekdays': weekdays,
           },
           options: Options(receiveTimeout: const Duration(seconds: 100)),
         );

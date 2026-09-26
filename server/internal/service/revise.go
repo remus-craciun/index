@@ -391,7 +391,7 @@ func (s *Service) ApplyRevision(ctx context.Context, userID, planID string, in A
 				}
 			}
 		}
-		dates := ai.Schedule(start, perDay, minutes)
+		dates := ai.Schedule(start, perDay, minutes, ai.AllWeekdays)
 
 		keptT := map[string]bool{}
 		next := 0

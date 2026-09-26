@@ -22,7 +22,7 @@ Rules:
 - Tasks are listed in the order they should be done.
 - Use notes for key points, suggested resources or what "done" looks like.
 - Respect the time budget given: the sum of estimated_minutes should roughly fill, and not exceed,
-  the available minutes.
+  the available minutes. The learner can only work on the listed weekdays, so count only those days.
 - Keep titles short. Write in the same language as the goal.`
 
 const breakdownInstruction = `You are a productivity coach. Break the given task into 2-8 smaller,
@@ -46,28 +46,34 @@ func NewGemini(ctx context.Context, apiKey, model string) (*Gemini, error) {
 }
 
 func (g *Gemini) DecomposePlan(ctx context.Context, req DecomposeRequest) (PlanDraft, error) {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Goal: %s\n", req.Prompt)
-	fmt.Fprintf(&b, "Start date: %s\n", req.StartDate)
-	fmt.Fprintf(&b, "Daily time budget: %d minutes\n", req.MinutesPerDay)
-	if req.TargetDate != "" {
-		fmt.Fprintf(&b, "Target completion date: %s\n", req.TargetDate)
-		if start, err := time.Parse(time.DateOnly, req.StartDate); err == nil {
-			if end, err := time.Parse(time.DateOnly, req.TargetDate); err == nil {
-				days := int(end.Sub(start).Hours()/24) + 1
-				fmt.Fprintf(&b, "Available days: %d (about %d minutes in total)\n", days, days*req.MinutesPerDay)
-			}
-		}
-	}
-
 	var draft PlanDraft
-	if err := g.generate(ctx, decomposeInstruction, b.String(), planSchema, &draft); err != nil {
+	if err := g.generate(ctx, decomposeInstruction, decomposePrompt(req), planSchema, &draft); err != nil {
 		return PlanDraft{}, err
 	}
 	if err := draft.Validate(); err != nil {
 		return PlanDraft{}, err
 	}
 	return draft, nil
+}
+
+// decomposePrompt is the user prompt for plan generation. It names the
+// weekdays the learner can work, and sizes the total budget to those days.
+func decomposePrompt(req DecomposeRequest) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Goal: %s\n", req.Prompt)
+	fmt.Fprintf(&b, "Start date: %s\n", req.StartDate)
+	fmt.Fprintf(&b, "Daily time budget: %d minutes\n", req.MinutesPerDay)
+	fmt.Fprintf(&b, "Days the learner can work: %s\n", describeWeekdays(req.Weekdays))
+	if req.TargetDate != "" {
+		fmt.Fprintf(&b, "Target completion date: %s\n", req.TargetDate)
+		if start, err := time.Parse(time.DateOnly, req.StartDate); err == nil {
+			if end, err := time.Parse(time.DateOnly, req.TargetDate); err == nil && !end.Before(start) {
+				days := countAvailableDays(start, end, req.Weekdays)
+				fmt.Fprintf(&b, "Available days: %d (about %d minutes in total)\n", days, days*req.MinutesPerDay)
+			}
+		}
+	}
+	return b.String()
 }
 
 func (g *Gemini) BreakdownTask(ctx context.Context, req BreakdownRequest) ([]TaskDraft, error) {

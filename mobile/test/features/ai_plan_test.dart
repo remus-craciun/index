@@ -57,6 +57,7 @@ class SlowAiAdapter implements HttpClientAdapter {
 
   final revisions = <String>[];
   var applied = 0;
+  int? decomposeWeekdays;
 
   static final proposal = {
     'summary': 'Swapped the intro task for a hands-on project.',
@@ -93,6 +94,7 @@ class SlowAiAdapter implements HttpClientAdapter {
   Future<ResponseBody> fetch(RequestOptions options, Stream<List<int>>? body, Future<void>? cancel) async {
     final headers = {Headers.contentTypeHeader: [Headers.jsonContentType]};
     if (options.path.endsWith('/ai/decompose-plan')) {
+      decomposeWeekdays = (options.data as Map)['weekdays'] as int?;
       await Future<void>.delayed(const Duration(seconds: 5));
       return ResponseBody.fromString(jsonEncode(plan), 201, headers: headers);
     }
@@ -142,6 +144,10 @@ void main() {
     await tester.tap(find.text('Generate a plan'));
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextField, 'What do you want to learn?'), 'Learn distributed systems in Go');
+    await tester.ensureVisible(find.text('Weekdays'));
+    await tester.tap(find.text('Weekdays'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Generate plan'));
     await tester.tap(find.text('Generate plan'));
     await tester.pump();
     expect(find.text('Designing your plan…'), findsOneWidget);
@@ -153,6 +159,7 @@ void main() {
     expect(find.textContaining('Cannot use the Ref'), findsNothing);
     expect(find.text('Distributed Go'), findsOneWidget, reason: 'navigated to the new plan');
     expect(find.text('Goroutines and channels'), findsOneWidget);
+    expect((dio.httpClientAdapter as SlowAiAdapter).decomposeWeekdays, 31, reason: 'weekdays sent to the model request');
 
     // Follow-up request: preview, then apply.
     final adapter = dio.httpClientAdapter as SlowAiAdapter;

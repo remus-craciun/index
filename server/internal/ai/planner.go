@@ -44,6 +44,7 @@ type DecomposeRequest struct {
 	StartDate     string // YYYY-MM-DD
 	TargetDate    string // YYYY-MM-DD, optional
 	MinutesPerDay int
+	Weekdays      int // bitmask, Monday = 1 … Sunday = 64; 0 means every day
 }
 
 type BreakdownRequest struct {

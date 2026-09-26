@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/time.dart';
 import '../../../core/ui/format.dart';
+import '../../../core/ui/pickers.dart';
 import '../../../core/ui/widgets.dart';
 import '../../repositories.dart';
+import '../../routines/domain/weekdays.dart';
 
 /// Turns a free-form goal into a scheduled learning plan via the server.
 class AiPlanScreen extends ConsumerStatefulWidget {
@@ -20,6 +22,7 @@ class _AiPlanScreenState extends ConsumerState<AiPlanScreen> {
   String _start = todayKey();
   String? _target;
   double _minutes = 60;
+  int _weekdays = Weekdays.everyDay;
   bool _busy = false;
   String? _error;
 
@@ -72,6 +75,7 @@ class _AiPlanScreenState extends ConsumerState<AiPlanScreen> {
             startDate: _start,
             targetDate: _target,
             minutesPerDay: _minutes.round(),
+            weekdays: _weekdays,
           );
       if (mounted) context.pushReplacement('/plans/$id');
     } catch (e) {
@@ -136,6 +140,14 @@ class _AiPlanScreenState extends ConsumerState<AiPlanScreen> {
                 onTap: _busy ? null : () => _pick(target: true),
               ),
               const SizedBox(height: 8),
+              Text('Days you can work', style: theme.textTheme.bodyMedium),
+              Text(
+                Weekdays.describe(_weekdays),
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 8),
+              WeekdayPicker(mask: _weekdays, onChanged: (m) => setState(() => _weekdays = m)),
+              const SizedBox(height: 16),
               Text('Time per day: ${formatMinutes(_minutes.round())}', style: theme.textTheme.bodyMedium),
               Slider(
                 value: _minutes,
