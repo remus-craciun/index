@@ -96,7 +96,7 @@ func (s *Service) CreatePlan(ctx context.Context, userID string, in PlanInput) (
 		now := s.nowString()
 		if err := q.InsertPlan(ctx, sqlcgen.InsertPlanParams{
 			ID: id, UserID: userID, Title: title, Description: strings.TrimSpace(in.Description),
-			TargetDate: in.TargetDate, Status: status, CreatedAt: now, UpdatedAt: now, ServerRev: rev,
+			TargetDate: in.TargetDate, Status: status, Weekdays: 127, CreatedAt: now, UpdatedAt: now, ServerRev: rev,
 		}); err != nil {
 			return err
 		}
@@ -135,7 +135,7 @@ func (s *Service) UpdatePlan(ctx context.Context, userID, id string, in PlanPatc
 		p.UpdatedAt = s.nowString()
 		if err := q.UpdatePlan(ctx, sqlcgen.UpdatePlanParams{
 			ID: id, UserID: userID, Title: p.Title, Description: p.Description, TargetDate: p.TargetDate,
-			Status: p.Status, UpdatedAt: p.UpdatedAt, ServerRev: rev,
+			Status: p.Status, Weekdays: p.Weekdays, UpdatedAt: p.UpdatedAt, ServerRev: rev,
 		}); err != nil {
 			return err
 		}

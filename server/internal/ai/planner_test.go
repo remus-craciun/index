@@ -53,6 +53,42 @@ func TestScheduleSkipsUnavailableWeekdays(t *testing.T) {
 	}
 }
 
+func TestResolveWeekdaysKeepsCurrentUnlessTheRequestChangesThem(t *testing.T) {
+	const current = Workdays
+	if got := ResolveWeekdays(current, "make it more hands-on", []string{"Wednesday"}); got != current {
+		t.Fatalf("unrelated request changed days: %d", got)
+	}
+	if got := ResolveWeekdays(current, "make the Monday task shorter", nil); got != current {
+		t.Fatalf("mentioning a task's day changed the mask: %d", got)
+	}
+	if got := ResolveWeekdays(current, "I can only work on Wednesdays", []string{"Wednesday"}); got != 4 {
+		t.Fatalf("model days: got %d", got)
+	}
+	if got := ResolveWeekdays(current, "add Saturday", nil); got != current|32 {
+		t.Fatalf("add Saturday: got %d", got)
+	}
+	if got := ResolveWeekdays(current, "drop Fridays", nil); got != current&^16 {
+		t.Fatalf("drop Fridays: got %d", got)
+	}
+	if got := ResolveWeekdays(current, "switch to weekends", nil); got != 96 {
+		t.Fatalf("weekends: got %d", got)
+	}
+}
+
+func TestRevisePromptNamesCurrentDays(t *testing.T) {
+	got := revisePrompt(ReviseRequest{
+		Instruction: "only Saturdays", Today: "2026-03-05", MinutesPerDay: 45, Weekdays: Workdays,
+	})
+	for _, want := range []string{
+		"Days the learner can currently work: Monday, Tuesday, Wednesday, Thursday, Friday",
+		"Keep these days unless the request changes which days they can work.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestDecomposePromptNamesWorkingDays(t *testing.T) {
 	// Monday 2026-03-02 through Sunday 2026-03-08, Wednesdays only: one day.
 	got := decomposePrompt(DecomposeRequest{

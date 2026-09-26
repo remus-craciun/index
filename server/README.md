@@ -68,7 +68,7 @@ There is exactly one account.
 | POST | `/sync` | |
 | POST | `/ai/decompose-plan` | `{prompt, start_date?, target_date?, minutes_per_day?, weekdays?}` |
 | POST | `/ai/breakdown-task` | `{task_id}` |
-| POST | `/ai/revise-plan` | `{plan_id, instruction, today?, minutes_per_day?}`: previews a follow-up request, stores nothing |
+| POST | `/ai/revise-plan` | `{plan_id, instruction, today?, minutes_per_day?}`: previews a follow-up request, stores nothing. Keeps the plan's weekdays unless the instruction changes them |
 | POST | `/plans/{id}/apply-revision` | `{revision, start_date?, minutes_per_day?}`: stores a previewed revision |
 
 How the endpoints behave:
@@ -79,7 +79,7 @@ How the endpoints behave:
 - **Errors** look like `{"error": {"code", "message"}}`.
 - **`/today`** lists pending tasks scheduled on or before the date, ordered overdue first, then learning tasks, then ad-hoc ones. Tasks completed or skipped on that date come after them. Items carry `overdue`, `milestone_title`, `plan_id` and `plan_title`.
 - **`/ai/decompose-plan`** asks Gemini for a plan (JSON schema enforced). The prompt names the `weekdays` the learner can work (a bitmask, Monday = 1 … Sunday = 64; omitted means every day) and sizes the total minutes to those days only. Tasks are then packed from `start_date` onto those weekdays, filling up to `minutes_per_day` each day. It saves the plan and returns it nested.
-- **`/ai/revise-plan`** sends the current plan (with IDs, statuses and dates) and the request to Gemini, then reconciles the answer. It returns `{revision, summary, changes, minutes_per_day}`, where `changes` lists what was added, removed, updated or moved. Nothing is stored until the client posts `revision` to **`/plans/{id}/apply-revision`**. Applying re-spreads pending tasks over days from `start_date`. Whichever endpoint receives it, a revision can't edit or remove completed or skipped tasks: dropped ones go back to their milestone, and IDs that don't belong to the plan become new items. The daily budget defaults to the plan's busiest scheduled day.
+- **`/ai/revise-plan`** sends the current plan (with IDs, statuses and dates), the days the learner can work, and the request to Gemini, then reconciles the answer. It returns `{revision, summary, changes, minutes_per_day, weekdays}`. `weekdays` stays as stored on the plan unless the request changes which days they can work. Nothing is stored until the client posts `revision` to **`/plans/{id}/apply-revision`**. Applying re-spreads pending tasks over those weekdays from `start_date` and saves the mask. Whichever endpoint receives it, a revision can't edit or remove completed or skipped tasks: dropped ones go back to their milestone, and IDs that don't belong to the plan become new items. The daily budget defaults to the plan's busiest scheduled day.
 - **`/ai/breakdown-task`** replaces a task with 2–8 subtasks. They inherit its milestone and date, and the original task is soft-deleted.
 
 ## Sync contract

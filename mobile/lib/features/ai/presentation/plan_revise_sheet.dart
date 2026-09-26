@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/ui/format.dart';
 import '../../../core/ui/widgets.dart';
 import '../../repositories.dart';
+import '../../routines/domain/weekdays.dart';
 import '../domain/revision.dart';
 
 Future<void> showPlanReviseSheet(BuildContext context, String planId) {
@@ -185,7 +186,7 @@ class _PlanReviseSheetState extends ConsumerState<PlanReviseSheet> {
                 for (final c in p.changes) _ChangeRow(change: c),
               const SizedBox(height: 8),
               Text(
-                'Pending tasks will be re-spread from today at about ${formatMinutes(p.minutesPerDay)} a day.',
+                'Pending tasks will be re-spread from today at about ${formatMinutes(p.minutesPerDay)} a day${_onDays(p.weekdays)}.',
                 style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
             ],
@@ -265,6 +266,12 @@ class _ChangeRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// " on weekdays" when the plan isn't scheduled every day.
+String _onDays(int weekdays) {
+  if (weekdays == Weekdays.everyDay || weekdays == 0) return '';
+  return ' on ${Weekdays.describe(weekdays).toLowerCase()}';
 }
 
 class _HistoryItem extends StatelessWidget {

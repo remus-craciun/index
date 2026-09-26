@@ -628,6 +628,84 @@ func TestRevisePlan(t *testing.T) {
 	}
 }
 
+func TestReviseKeepsWeekdaysUnlessInstructionChangesThem(t *testing.T) {
+	fp := &fakePlanner{
+		plan: ai.PlanDraft{
+			Title: "Go", Description: "basics",
+			Milestones: []ai.MilestoneDraft{
+				{Title: "Foundations", OrderIndex: 1, Tasks: []ai.TaskDraft{
+					{Title: "Syntax", EstimatedMinutes: 30}, {Title: "Types", EstimatedMinutes: 30}, {Title: "Maps", EstimatedMinutes: 30},
+				}},
+				{Title: "Concurrency", OrderIndex: 2, Tasks: []ai.TaskDraft{{Title: "Goroutines", EstimatedMinutes: 60}}},
+			},
+		},
+	}
+	fp.revise = func(req ai.ReviseRequest) ai.PlanRevision {
+		var ms []ai.RevMilestone
+		for _, m := range req.Current.Milestones {
+			rm := ai.RevMilestone{ID: m.ID, Title: m.Title, OrderIndex: m.OrderIndex}
+			for _, task := range m.Tasks {
+				rm.Tasks = append(rm.Tasks, ai.RevTask{ID: task.ID, Title: task.Title, EstimatedMinutes: task.EstimatedMinutes, Notes: task.Notes})
+			}
+			ms = append(ms, rm)
+		}
+		return ai.PlanRevision{Title: req.Current.Title, Description: req.Current.Description, Summary: "Kept the lessons.", Milestones: ms, WorkingDays: []string{"Wednesday"}}
+	}
+	c := newServer(t, fp)
+	c.login()
+
+	var plan service.PlanDetail
+	c.do("POST", "/ai/decompose-plan", map[string]any{
+		"prompt": "Learn Go", "start_date": "2026-03-02", "minutes_per_day": 60, "weekdays": ai.Workdays,
+	}, 201, &plan)
+
+	// A later client sync of the plan must not wipe the stored days.
+	c.do("POST", "/sync", service.SyncRequest{Changes: service.Changes{LearningPlans: []service.Plan{{
+		ID: plan.ID, Title: "Go", Description: plan.Description, TargetDate: plan.TargetDate, Status: "active",
+		CreatedAt: plan.CreatedAt, UpdatedAt: "2099-01-01T00:00:00.000Z",
+	}}}}, 200, nil)
+
+	var kept service.RevisionProposal
+	c.do("POST", "/ai/revise-plan", map[string]any{"plan_id": plan.ID, "instruction": "make it faster", "today": "2026-03-06"}, 200, &kept)
+	if fp.gotRevise.Weekdays != ai.Workdays || kept.Weekdays != ai.Workdays || kept.Revision.Weekdays != ai.Workdays {
+		t.Fatalf("weekdays not kept: request %d proposal %d revision %d", fp.gotRevise.Weekdays, kept.Weekdays, kept.Revision.Weekdays)
+	}
+	var after service.PlanDetail
+	c.do("POST", "/plans/"+plan.ID+"/apply-revision", map[string]any{
+		"revision": kept.Revision, "start_date": "2026-03-06", "minutes_per_day": 60,
+	}, 200, &after)
+	dates := scheduledDates(after)
+	// Friday holds 30+30, then Monday and Tuesday. Saturday and Sunday are skipped.
+	if dates["Syntax"] != "2026-03-06" || dates["Types"] != "2026-03-06" || dates["Maps"] != "2026-03-09" || dates["Goroutines"] != "2026-03-10" {
+		t.Fatalf("kept weekdays: %+v", dates)
+	}
+
+	var changed service.RevisionProposal
+	c.do("POST", "/ai/revise-plan", map[string]any{"plan_id": plan.ID, "instruction": "I can only work on Wednesdays", "today": "2026-03-06"}, 200, &changed)
+	if changed.Weekdays != 4 {
+		t.Fatalf("weekdays = %d, want Wednesday", changed.Weekdays)
+	}
+	c.do("POST", "/plans/"+plan.ID+"/apply-revision", map[string]any{
+		"revision": changed.Revision, "start_date": "2026-03-06", "minutes_per_day": 60,
+	}, 200, &after)
+	dates = scheduledDates(after)
+	if dates["Syntax"] != "2026-03-11" || dates["Types"] != "2026-03-11" || dates["Maps"] != "2026-03-18" || dates["Goroutines"] != "2026-03-25" {
+		t.Fatalf("wednesday only: %+v", dates)
+	}
+}
+
+func scheduledDates(plan service.PlanDetail) map[string]string {
+	out := map[string]string{}
+	for _, m := range plan.Milestones {
+		for _, task := range m.Tasks {
+			if task.ScheduledDate != nil {
+				out[task.Title] = *task.ScheduledDate
+			}
+		}
+	}
+	return out
+}
+
 func TestSessions(t *testing.T) {
 	c := newServer(t, nil)
 	var phone, laptop auth.Tokens

@@ -94,7 +94,7 @@ func (s *Service) DecomposePlan(ctx context.Context, userID string, in Decompose
 		now := s.nowString()
 		if err := q.InsertPlan(ctx, sqlcgen.InsertPlanParams{
 			ID: planID, UserID: userID, Title: draft.Title, Description: draft.Description,
-			TargetDate: &target, Status: "active", CreatedAt: now, UpdatedAt: now, ServerRev: rev,
+			TargetDate: &target, Status: "active", Weekdays: int64(weekdays), CreatedAt: now, UpdatedAt: now, ServerRev: rev,
 		}); err != nil {
 			return err
 		}

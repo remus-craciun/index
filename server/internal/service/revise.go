@@ -28,6 +28,7 @@ type RevisionProposal struct {
 	Summary       string          `json:"summary"`
 	Changes       []Change        `json:"changes"`
 	MinutesPerDay int             `json:"minutes_per_day"`
+	Weekdays      int             `json:"weekdays"`
 }
 
 type ReviseInput struct {
@@ -302,8 +303,9 @@ func (s *Service) RevisePlan(ctx context.Context, userID string, in ReviseInput)
 		return RevisionProposal{}, invalid("minutes_per_day must be between 10 and 600")
 	}
 
+	currentDays := int(st.plan.Weekdays)
 	rev, err := s.planner.RevisePlan(ctx, ai.ReviseRequest{
-		Instruction: instruction, Current: st.current(), Today: today, MinutesPerDay: perDay,
+		Instruction: instruction, Current: st.current(), Today: today, MinutesPerDay: perDay, Weekdays: currentDays,
 	})
 	if err != nil {
 		return RevisionProposal{}, err
@@ -312,6 +314,7 @@ func (s *Service) RevisePlan(ctx context.Context, userID string, in ReviseInput)
 	if err != nil {
 		return RevisionProposal{}, err
 	}
+	clean.Weekdays = ai.ResolveWeekdays(currentDays, instruction, rev.WorkingDays)
 	summary := strings.TrimSpace(rev.Summary)
 	if summary == "" && len(changes) == 0 {
 		summary = "No changes were needed."
@@ -319,7 +322,7 @@ func (s *Service) RevisePlan(ctx context.Context, userID string, in ReviseInput)
 	if changes == nil {
 		changes = []Change{}
 	}
-	return RevisionProposal{Revision: clean, Summary: summary, Changes: changes, MinutesPerDay: perDay}, nil
+	return RevisionProposal{Revision: clean, Summary: summary, Changes: changes, MinutesPerDay: perDay, Weekdays: clean.Weekdays}, nil
 }
 
 // ApplyRevision stores a revision (normally a proposal from RevisePlan) and
@@ -346,6 +349,10 @@ func (s *Service) ApplyRevision(ctx context.Context, userID, planID string, in A
 		if perDay < 10 || perDay > 600 {
 			return invalid("minutes_per_day must be between 10 and 600")
 		}
+		weekdays := int(st.plan.Weekdays)
+		if in.Revision.Weekdays >= 1 && in.Revision.Weekdays <= ai.AllWeekdays {
+			weekdays = in.Revision.Weekdays
+		}
 		plan, _, err := st.reconcile(in.Revision)
 		if err != nil {
 			return invalid("%v", err)
@@ -354,7 +361,7 @@ func (s *Service) ApplyRevision(ctx context.Context, userID, planID string, in A
 
 		if err := q.UpdatePlan(ctx, sqlcgen.UpdatePlanParams{
 			ID: planID, UserID: userID, Title: plan.Title, Description: plan.Description,
-			TargetDate: st.plan.TargetDate, Status: st.plan.Status, UpdatedAt: now, ServerRev: rev,
+			TargetDate: st.plan.TargetDate, Status: st.plan.Status, Weekdays: int64(weekdays), UpdatedAt: now, ServerRev: rev,
 		}); err != nil {
 			return err
 		}
@@ -391,7 +398,7 @@ func (s *Service) ApplyRevision(ctx context.Context, userID, planID string, in A
 				}
 			}
 		}
-		dates := ai.Schedule(start, perDay, minutes, ai.AllWeekdays)
+		dates := ai.Schedule(start, perDay, minutes, weekdays)
 
 		keptT := map[string]bool{}
 		next := 0

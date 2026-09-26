@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/remus-craciun/index/server/internal/ai"
 	"github.com/remus-craciun/index/server/internal/db"
 	"github.com/remus-craciun/index/server/internal/db/sqlcgen"
 	"github.com/remus-craciun/index/server/internal/timeutil"
@@ -107,7 +108,7 @@ func applyChanges(ctx context.Context, q *sqlcgen.Queries, userID string, rev in
 	for _, p := range c.LearningPlans {
 		n, err := q.UpsertPlanLWW(ctx, sqlcgen.UpsertPlanLWWParams{
 			ID: p.ID, UserID: userID, Title: p.Title, Description: p.Description, TargetDate: p.TargetDate,
-			Status: p.Status, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt, DeletedAt: p.DeletedAt, ServerRev: rev,
+			Status: p.Status, Weekdays: ai.AllWeekdays, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt, DeletedAt: p.DeletedAt, ServerRev: rev,
 		})
 		if err != nil {
 			return lost, fmt.Errorf("plan %s: %w", p.ID, err)

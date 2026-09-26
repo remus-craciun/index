@@ -10,7 +10,7 @@ import (
 )
 
 const getPlan = `-- name: GetPlan :one
-SELECT id, user_id, title, description, target_date, status, created_at, updated_at, deleted_at, server_rev FROM learning_plans
+SELECT id, user_id, title, description, target_date, status, created_at, updated_at, deleted_at, server_rev, weekdays FROM learning_plans
 WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL
 `
 
@@ -33,12 +33,13 @@ func (q *Queries) GetPlan(ctx context.Context, arg GetPlanParams) (LearningPlan,
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.ServerRev,
+		&i.Weekdays,
 	)
 	return i, err
 }
 
 const getPlanIncludingDeleted = `-- name: GetPlanIncludingDeleted :one
-SELECT id, user_id, title, description, target_date, status, created_at, updated_at, deleted_at, server_rev FROM learning_plans
+SELECT id, user_id, title, description, target_date, status, created_at, updated_at, deleted_at, server_rev, weekdays FROM learning_plans
 WHERE id = ?1 AND user_id = ?2
 `
 
@@ -61,13 +62,14 @@ func (q *Queries) GetPlanIncludingDeleted(ctx context.Context, arg GetPlanInclud
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.ServerRev,
+		&i.Weekdays,
 	)
 	return i, err
 }
 
 const insertPlan = `-- name: InsertPlan :exec
-INSERT INTO learning_plans (id, user_id, title, description, target_date, status, created_at, updated_at, deleted_at, server_rev)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9)
+INSERT INTO learning_plans (id, user_id, title, description, target_date, status, weekdays, created_at, updated_at, deleted_at, server_rev)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10)
 `
 
 type InsertPlanParams struct {
@@ -77,6 +79,7 @@ type InsertPlanParams struct {
 	Description string
 	TargetDate  *string
 	Status      string
+	Weekdays    int64
 	CreatedAt   string
 	UpdatedAt   string
 	ServerRev   int64
@@ -90,6 +93,7 @@ func (q *Queries) InsertPlan(ctx context.Context, arg InsertPlanParams) error {
 		arg.Description,
 		arg.TargetDate,
 		arg.Status,
+		arg.Weekdays,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.ServerRev,
@@ -98,7 +102,7 @@ func (q *Queries) InsertPlan(ctx context.Context, arg InsertPlanParams) error {
 }
 
 const listPlans = `-- name: ListPlans :many
-SELECT id, user_id, title, description, target_date, status, created_at, updated_at, deleted_at, server_rev FROM learning_plans
+SELECT id, user_id, title, description, target_date, status, created_at, updated_at, deleted_at, server_rev, weekdays FROM learning_plans
 WHERE user_id = ?1 AND deleted_at IS NULL
 ORDER BY created_at
 `
@@ -123,6 +127,7 @@ func (q *Queries) ListPlans(ctx context.Context, userID string) ([]LearningPlan,
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.ServerRev,
+			&i.Weekdays,
 		); err != nil {
 			return nil, err
 		}
@@ -138,7 +143,7 @@ func (q *Queries) ListPlans(ctx context.Context, userID string) ([]LearningPlan,
 }
 
 const listPlansChangedSince = `-- name: ListPlansChangedSince :many
-SELECT id, user_id, title, description, target_date, status, created_at, updated_at, deleted_at, server_rev FROM learning_plans
+SELECT id, user_id, title, description, target_date, status, created_at, updated_at, deleted_at, server_rev, weekdays FROM learning_plans
 WHERE user_id = ?1 AND server_rev > ?2
 ORDER BY server_rev
 `
@@ -168,6 +173,7 @@ func (q *Queries) ListPlansChangedSince(ctx context.Context, arg ListPlansChange
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.ServerRev,
+			&i.Weekdays,
 		); err != nil {
 			return nil, err
 		}
@@ -211,8 +217,8 @@ func (q *Queries) SoftDeletePlan(ctx context.Context, arg SoftDeletePlanParams) 
 const updatePlan = `-- name: UpdatePlan :exec
 UPDATE learning_plans
 SET title = ?1, description = ?2, target_date = ?3, status = ?4,
-    updated_at = ?5, server_rev = ?6
-WHERE id = ?7 AND user_id = ?8
+    weekdays = ?5, updated_at = ?6, server_rev = ?7
+WHERE id = ?8 AND user_id = ?9
 `
 
 type UpdatePlanParams struct {
@@ -220,6 +226,7 @@ type UpdatePlanParams struct {
 	Description string
 	TargetDate  *string
 	Status      string
+	Weekdays    int64
 	UpdatedAt   string
 	ServerRev   int64
 	ID          string
@@ -232,6 +239,7 @@ func (q *Queries) UpdatePlan(ctx context.Context, arg UpdatePlanParams) error {
 		arg.Description,
 		arg.TargetDate,
 		arg.Status,
+		arg.Weekdays,
 		arg.UpdatedAt,
 		arg.ServerRev,
 		arg.ID,
@@ -241,8 +249,8 @@ func (q *Queries) UpdatePlan(ctx context.Context, arg UpdatePlanParams) error {
 }
 
 const upsertPlanLWW = `-- name: UpsertPlanLWW :execrows
-INSERT INTO learning_plans (id, user_id, title, description, target_date, status, created_at, updated_at, deleted_at, server_rev)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+INSERT INTO learning_plans (id, user_id, title, description, target_date, status, weekdays, created_at, updated_at, deleted_at, server_rev)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
 ON CONFLICT (id) DO UPDATE SET
     title = excluded.title,
     description = excluded.description,
@@ -262,12 +270,15 @@ type UpsertPlanLWWParams struct {
 	Description string
 	TargetDate  *string
 	Status      string
+	Weekdays    int64
 	CreatedAt   string
 	UpdatedAt   string
 	DeletedAt   *string
 	ServerRev   int64
 }
 
+// weekdays is set on insert only. Client sync doesn't know it, and must not
+// wipe the days chosen when the plan was generated or last revised.
 func (q *Queries) UpsertPlanLWW(ctx context.Context, arg UpsertPlanLWWParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, upsertPlanLWW,
 		arg.ID,
@@ -276,6 +287,7 @@ func (q *Queries) UpsertPlanLWW(ctx context.Context, arg UpsertPlanLWWParams) (i
 		arg.Description,
 		arg.TargetDate,
 		arg.Status,
+		arg.Weekdays,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.DeletedAt,

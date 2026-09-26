@@ -33,6 +33,10 @@ type PlanRevision struct {
 	Description string         `json:"description"`
 	Summary     string         `json:"summary,omitempty"`
 	Milestones  []RevMilestone `json:"milestones"`
+	// Weekdays is the mask to schedule on after this revision. The model
+	// fills WorkingDays; the service resolves that into Weekdays.
+	Weekdays    int      `json:"weekdays,omitempty"`
+	WorkingDays []string `json:"working_days,omitempty"`
 }
 
 // CurrentTask / CurrentMilestone / CurrentPlan describe the plan as it is,
@@ -65,6 +69,7 @@ type ReviseRequest struct {
 	Current       CurrentPlan
 	Today         string // YYYY-MM-DD
 	MinutesPerDay int
+	Weekdays      int // bitmask the learner can currently work; 0 means every day
 }
 
 const reviseInstruction = `You are an expert curriculum designer editing an existing learning plan
@@ -80,6 +85,9 @@ Rules:
   parts of the plan.
 - Keep tasks small and concrete (typically 15-90 minutes), in the order they should be done.
 - "summary": one to three short sentences telling the learner what you changed.
+- "working_days": the weekdays the learner can work after this change, as English day names
+  (Monday … Sunday). Keep the current days unless the request changes which days they can
+  work. When it does, size the plan for the new days.
 - Write in the same language as the plan.`
 
 var revisionTaskSchema = &genai.Schema{
@@ -100,6 +108,15 @@ var revisionSchema = &genai.Schema{
 		"summary":     {Type: genai.TypeString, Description: "What changed, for the learner."},
 		"title":       {Type: genai.TypeString},
 		"description": {Type: genai.TypeString},
+		"working_days": {
+			Type:        genai.TypeArray,
+			MinItems:    ptr[int64](1),
+			Description: "Weekdays the learner can work after this request. Same as the current days unless the request changes them.",
+			Items: &genai.Schema{
+				Type: genai.TypeString,
+				Enum: []string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"},
+			},
+		},
 		"milestones": {
 			Type:     genai.TypeArray,
 			MinItems: ptr[int64](1),
@@ -116,8 +133,21 @@ var revisionSchema = &genai.Schema{
 			},
 		},
 	},
-	Required:         []string{"summary", "title", "description", "milestones"},
-	PropertyOrdering: []string{"summary", "title", "description", "milestones"},
+	Required:         []string{"summary", "title", "description", "milestones", "working_days"},
+	PropertyOrdering: []string{"summary", "title", "description", "working_days", "milestones"},
+}
+
+// revisePrompt is the user prompt for a follow-up edit. It names the days
+// the learner can currently work and tells the model to keep them unless
+// the request changes that.
+func revisePrompt(req ReviseRequest) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Request: %s\n\n", req.Instruction)
+	fmt.Fprintf(&b, "Today: %s\n", req.Today)
+	fmt.Fprintf(&b, "Daily time budget: %d minutes\n", req.MinutesPerDay)
+	fmt.Fprintf(&b, "Days the learner can currently work: %s\n", describeWeekdays(req.Weekdays))
+	fmt.Fprintf(&b, "Keep these days unless the request changes which days they can work.\n\n")
+	return b.String()
 }
 
 func (g *Gemini) RevisePlan(ctx context.Context, req ReviseRequest) (PlanRevision, error) {
@@ -126,9 +156,7 @@ func (g *Gemini) RevisePlan(ctx context.Context, req ReviseRequest) (PlanRevisio
 		return PlanRevision{}, err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Request: %s\n\n", req.Instruction)
-	fmt.Fprintf(&b, "Today: %s\n", req.Today)
-	fmt.Fprintf(&b, "Daily time budget: %d minutes\n\n", req.MinutesPerDay)
+	b.WriteString(revisePrompt(req))
 	fmt.Fprintf(&b, "Current plan:\n%s\n", current)
 
 	var out PlanRevision

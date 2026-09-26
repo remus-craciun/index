@@ -15,6 +15,7 @@ type LearningPlan struct {
 	UpdatedAt   string
 	DeletedAt   *string
 	ServerRev   int64
+	Weekdays    int64
 }
 
 type Milestone struct {
