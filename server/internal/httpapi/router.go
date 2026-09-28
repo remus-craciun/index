@@ -12,6 +12,7 @@ import (
 
 	"github.com/remus-craciun/index/server/internal/auth"
 	"github.com/remus-craciun/index/server/internal/service"
+	"github.com/remus-craciun/index/server/internal/webui"
 )
 
 type api struct {
@@ -39,6 +40,13 @@ func NewRouter(svc *service.Service, tokens *auth.Issuer, corsOrigins []string, 
 	r.Get("/healthz", a.health)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		// Set before the parent NotFound. Chi copies a parent's NotFound into
+		// subrouters that don't have one, which would serve the web app for
+		// unknown API paths.
+		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		})
+
 		r.Get("/health", a.health)
 
 		r.Group(func(r chi.Router) {
@@ -84,5 +92,10 @@ func NewRouter(svc *service.Service, tokens *auth.Issuer, corsOrigins []string, 
 			})
 		})
 	})
+
+	// Anything that is not the API is the Flutter web app. Registered routes
+	// (/api, /health, /healthz) keep their handlers; unknown API paths stay
+	// inside the /api route and do not fall through to the app.
+	r.NotFound(webui.Handler().ServeHTTP)
 	return r
 }

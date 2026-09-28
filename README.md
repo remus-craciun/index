@@ -4,5 +4,5 @@ A single-user, offline-first productivity app: ad-hoc tasks, AI-generated learni
 
 | Folder | What |
 |---|---|
-| [`server/`](server/) | Go backend: REST API, delta sync, Gemini plan decomposition. See [server/README.md](server/README.md). |
-| [`mobile/`](mobile/) | Flutter client (Android): offline-first with Drift, Riverpod and Dio. See [mobile/README.md](mobile/README.md). |
+| [`server/`](server/) | Go backend: REST API, delta sync, Gemini plan decomposition, and the Flutter web UI. See [server/README.md](server/README.md). |
+| [`mobile/`](mobile/) | Flutter client (Android and web): offline-first with Drift, Riverpod and Dio. See [mobile/README.md](mobile/README.md). |

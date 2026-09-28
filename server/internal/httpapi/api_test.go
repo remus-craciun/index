@@ -123,6 +123,48 @@ func TestHealth(t *testing.T) {
 	root.do("GET", "/healthz", nil, 200, nil)
 }
 
+func TestWebUIDoesNotShadowAPI(t *testing.T) {
+	c := newServer(t, nil)
+	root := strings.TrimSuffix(c.base, "/api/v1")
+
+	resp, err := http.Get(root + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "flutter_bootstrap.js") {
+		t.Fatalf("GET /: status %d, body %s", resp.StatusCode, body)
+	}
+
+	resp, err = http.Get(root + "/today")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	routeBody, _ := io.ReadAll(resp.Body)
+	if string(routeBody) != string(body) {
+		t.Fatal("GET /today did not serve the web app")
+	}
+
+	var h struct{ Status string }
+	rootClient := &client{t: t, base: root}
+	rootClient.do("GET", "/healthz", nil, 200, &h)
+	if h.Status != "ok" {
+		t.Fatalf("healthz was shadowed by the web UI: %+v", h)
+	}
+
+	missing, err := http.Get(root + "/api/v1/no-such")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer missing.Body.Close()
+	missingBody, _ := io.ReadAll(missing.Body)
+	if missing.StatusCode != http.StatusNotFound || strings.Contains(string(missingBody), "flutter_bootstrap.js") || !strings.Contains(string(missingBody), `"not_found"`) {
+		t.Fatalf("unknown API path fell through to the web UI: %d %s", missing.StatusCode, missingBody)
+	}
+}
+
 func TestAuthFlow(t *testing.T) {
 	c := newServer(t, nil)
 

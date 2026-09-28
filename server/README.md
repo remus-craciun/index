@@ -2,7 +2,7 @@
 
 Backend for a single-user, offline-first productivity app: ad-hoc tasks, AI-generated learning plans, a merged "Today" schedule, and delta sync for the mobile client.
 
-Go, chi, SQLite (`modernc.org/sqlite`, CGO-free, WAL mode), sqlc, JWT, and Gemini structured output.
+Go, chi, SQLite (`modernc.org/sqlite`, CGO-free, WAL mode), sqlc, JWT, and Gemini structured output. The same process serves the Flutter web app at `/`.
 
 ## Run locally
 
@@ -31,6 +31,18 @@ go tool sqlc generate
 | `GEMINI_MODEL` | `gemini-flash-latest` | Any Gemini model that supports structured output |
 | `CORS_ORIGINS` | `*` | Comma-separated |
 | `ACCESS_TTL` / `REFRESH_TTL` | `15m` / `0` | Go duration syntax. `REFRESH_TTL=0` means refresh tokens never expire |
+
+## Web UI
+
+`GET /` and client routes such as `/today` serve the Flutter web build. `/api`, `/health`, and `/healthz` stay on the API. The files are embedded from `internal/webui/dist` at compile time, so Railpack (which only builds this directory) does not need Flutter.
+
+Regenerate that directory from the repo root when the client changes, and include it in what gets deployed:
+
+```sh
+scripts/build-web.sh
+```
+
+The script builds with `INDEX_SAME_ORIGIN=true`. That build fills the setup screen with the page's own origin and connects on first launch. `flutter run -d chrome` does not set the flag, so local web development still asks for the server address.
 
 ## Deploying on Coolify (Railpack)
 
