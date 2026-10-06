@@ -2,7 +2,7 @@
 
 Backend for a single-user, offline-first productivity app: ad-hoc tasks, AI-generated learning plans, a merged "Today" schedule, and delta sync for the mobile client.
 
-Go, chi, SQLite (`modernc.org/sqlite`, CGO-free, WAL mode), sqlc, JWT, and Gemini structured output.
+Go, chi, SQLite (`modernc.org/sqlite`, CGO-free, WAL mode), sqlc, JWT, and Gemini structured output. The same process serves the Flutter web app at `/`.
 
 ## Run locally
 
@@ -31,6 +31,18 @@ go tool sqlc generate
 | `GEMINI_MODEL` | `gemini-flash-latest` | Any Gemini model that supports structured output |
 | `CORS_ORIGINS` | `*` | Comma-separated |
 | `ACCESS_TTL` / `REFRESH_TTL` | `15m` / `0` | Go duration syntax. `REFRESH_TTL=0` means refresh tokens never expire |
+
+## Web UI
+
+`GET /` and client routes such as `/today` serve the Flutter web build. `/api`, `/health`, and `/healthz` stay on the API. The files are embedded from `internal/webui/dist` at compile time, so Railpack (which only builds this directory) does not need Flutter.
+
+Regenerate that directory from the repo root when the client changes, and include it in what gets deployed:
+
+```sh
+scripts/build-web.sh
+```
+
+The script builds with `INDEX_SAME_ORIGIN=true`. That build fills the setup screen with the page's own origin and connects on first launch. `flutter run -d chrome` does not set the flag, so local web development still asks for the server address.
 
 ## Deploying on Coolify (Railpack)
 
@@ -66,9 +78,9 @@ There is exactly one account.
 | PATCH, DELETE | `/tasks/{id}` | |
 | GET | `/today?date=YYYY-MM-DD` | Pass the device's local date |
 | POST | `/sync` | |
-| POST | `/ai/decompose-plan` | `{prompt, start_date?, target_date?, minutes_per_day?}` |
+| POST | `/ai/decompose-plan` | `{prompt, start_date?, target_date?, minutes_per_day?, weekdays?}` |
 | POST | `/ai/breakdown-task` | `{task_id}` |
-| POST | `/ai/revise-plan` | `{plan_id, instruction, today?, minutes_per_day?}`: previews a follow-up request, stores nothing |
+| POST | `/ai/revise-plan` | `{plan_id, instruction, today?, minutes_per_day?}`: previews a follow-up request, stores nothing. Keeps the plan's weekdays unless the instruction changes them |
 | POST | `/plans/{id}/apply-revision` | `{revision, start_date?, minutes_per_day?}`: stores a previewed revision |
 
 How the endpoints behave:
@@ -78,8 +90,8 @@ How the endpoints behave:
 - **Deletes are soft.** They set `deleted_at`.
 - **Errors** look like `{"error": {"code", "message"}}`.
 - **`/today`** lists pending tasks scheduled on or before the date, ordered overdue first, then learning tasks, then ad-hoc ones. Tasks completed or skipped on that date come after them. Items carry `overdue`, `milestone_title`, `plan_id` and `plan_title`.
-- **`/ai/decompose-plan`** asks Gemini for a plan (JSON schema enforced), then packs the tasks into days from `start_date`, filling up to `minutes_per_day` each day. It saves the plan and returns it nested.
-- **`/ai/revise-plan`** sends the current plan (with IDs, statuses, dates and times), a calendar of the coming weeks and the request to Gemini, then reconciles the answer. It returns `{revision, summary, changes, minutes_per_day}`, where `changes` lists what was added, removed, updated, moved or rescheduled. Nothing is stored until the client posts `revision` to **`/plans/{id}/apply-revision`**. The model states schedule changes per task (`new_date`, `new_start_time`; null keeps the task's day or time, `"none"` clears the time) and for the whole plan (`reschedule_from`, `minutes_per_day`). Pending tasks keep their day unless the revision moves them, changes the timeline, or adds, removes, resizes or reorders tasks; then the tasks without a new day are re-spread from `start_date` (or `reschedule_from`) around the ones fixed to a day. End times follow from `estimated_minutes`, and tasks given the same time on one day run back to back. The live prompt eval runs with `go test -tags live -run TestLiveRevise ./internal/ai/` (needs `GEMINI_API_KEY`). Whichever endpoint receives it, a revision can't edit or remove completed or skipped tasks: dropped ones go back to their milestone, and IDs that don't belong to the plan become new items. The daily budget defaults to the plan's busiest scheduled day.
+- **`/ai/decompose-plan`** asks Gemini for a plan (JSON schema enforced). The prompt names the `weekdays` the learner can work (a bitmask, Monday = 1 … Sunday = 64; omitted means every day) and sizes the total minutes to those days only. Tasks are then packed from `start_date` onto those weekdays, filling up to `minutes_per_day` each day. It saves the plan and returns it nested.
+- **`/ai/revise-plan`** sends the current plan (with IDs, statuses, dates and times), a calendar of the coming weeks, the days the learner can work, and the request to Gemini, then reconciles the answer. It returns `{revision, summary, changes, minutes_per_day, weekdays}`, where `changes` lists what was added, removed, updated, moved or rescheduled. `weekdays` stays as stored on the plan unless the request changes which days they can work. Nothing is stored until the client posts `revision` to **`/plans/{id}/apply-revision`**, which saves the mask too. The model states schedule changes per task (`new_date`, `new_start_time`; null keeps the task's day or time, `"none"` clears the time) and for the whole plan (`reschedule_from`, `minutes_per_day`). Pending tasks keep their day unless the revision moves them, changes the timeline or working days, or adds, removes, resizes or reorders tasks; then the tasks without a new day are re-spread over the working days from `start_date` (or `reschedule_from`) around the ones fixed to a day. End times follow from `estimated_minutes`, and tasks given the same time on one day run back to back. Whichever endpoint receives it, a revision can't edit or remove completed or skipped tasks: dropped ones go back to their milestone, and IDs that don't belong to the plan become new items. The daily budget defaults to the plan's busiest scheduled day. The live prompt eval runs with `go test -tags live -run TestLiveRevise ./internal/ai/` (needs `GEMINI_API_KEY`).
 - **`/ai/breakdown-task`** replaces a task with 2–8 subtasks. They inherit its milestone and date, and the original task is soft-deleted.
 
 ## Sync contract

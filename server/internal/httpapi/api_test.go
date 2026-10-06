@@ -123,6 +123,48 @@ func TestHealth(t *testing.T) {
 	root.do("GET", "/healthz", nil, 200, nil)
 }
 
+func TestWebUIDoesNotShadowAPI(t *testing.T) {
+	c := newServer(t, nil)
+	root := strings.TrimSuffix(c.base, "/api/v1")
+
+	resp, err := http.Get(root + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "flutter_bootstrap.js") {
+		t.Fatalf("GET /: status %d, body %s", resp.StatusCode, body)
+	}
+
+	resp, err = http.Get(root + "/today")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	routeBody, _ := io.ReadAll(resp.Body)
+	if string(routeBody) != string(body) {
+		t.Fatal("GET /today did not serve the web app")
+	}
+
+	var h struct{ Status string }
+	rootClient := &client{t: t, base: root}
+	rootClient.do("GET", "/healthz", nil, 200, &h)
+	if h.Status != "ok" {
+		t.Fatalf("healthz was shadowed by the web UI: %+v", h)
+	}
+
+	missing, err := http.Get(root + "/api/v1/no-such")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer missing.Body.Close()
+	missingBody, _ := io.ReadAll(missing.Body)
+	if missing.StatusCode != http.StatusNotFound || strings.Contains(string(missingBody), "flutter_bootstrap.js") || !strings.Contains(string(missingBody), `"not_found"`) {
+		t.Fatalf("unknown API path fell through to the web UI: %d %s", missing.StatusCode, missingBody)
+	}
+}
+
 func TestAuthFlow(t *testing.T) {
 	c := newServer(t, nil)
 
@@ -323,7 +365,7 @@ func TestAIDecomposeAndBreakdown(t *testing.T) {
 	c.do("POST", "/ai/decompose-plan", map[string]any{
 		"prompt": "Learn distributed systems in Go", "start_date": "2026-03-02", "minutes_per_day": 60,
 	}, 201, &plan)
-	if fp.gotReq.MinutesPerDay != 60 || fp.gotReq.StartDate != "2026-03-02" {
+	if fp.gotReq.MinutesPerDay != 60 || fp.gotReq.StartDate != "2026-03-02" || fp.gotReq.Weekdays != ai.AllWeekdays {
 		t.Fatalf("planner request: %+v", fp.gotReq)
 	}
 	if len(plan.Milestones) != 2 || plan.Milestones[0].Title != "Phase 1" {
@@ -347,6 +389,20 @@ func TestAIDecomposeAndBreakdown(t *testing.T) {
 	}
 	c.do("PATCH", "/tasks/"+raft.ID, map[string]any{"title": "x"}, 404, nil)
 	c.do("POST", "/ai/breakdown-task", map[string]any{"task_id": raft.ID}, 404, nil)
+
+	// Wednesday only: the two 30-minute tasks share 2026-03-04, Raft waits a week.
+	var wed service.PlanDetail
+	c.do("POST", "/ai/decompose-plan", map[string]any{
+		"prompt": "Learn distributed systems in Go", "start_date": "2026-03-02", "minutes_per_day": 60, "weekdays": 4,
+	}, 201, &wed)
+	if fp.gotReq.Weekdays != 4 {
+		t.Fatalf("weekdays not forwarded: %+v", fp.gotReq)
+	}
+	w1, w2 := wed.Milestones[0].Tasks, wed.Milestones[1].Tasks
+	if *w1[0].ScheduledDate != "2026-03-04" || *w1[1].ScheduledDate != "2026-03-04" || *w2[0].ScheduledDate != "2026-03-11" {
+		t.Fatalf("weekday scheduling wrong: %s %s %s", *w1[0].ScheduledDate, *w1[1].ScheduledDate, *w2[0].ScheduledDate)
+	}
+	c.do("POST", "/ai/decompose-plan", map[string]any{"prompt": "x", "weekdays": 0}, 400, nil)
 }
 
 func TestAIDisabled(t *testing.T) {
@@ -784,6 +840,85 @@ func TestReviseSchedule(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestReviseKeepsWeekdaysUnlessInstructionChangesThem(t *testing.T) {
+	fp := &fakePlanner{
+		plan: ai.PlanDraft{
+			Title: "Go", Description: "basics",
+			Milestones: []ai.MilestoneDraft{
+				{Title: "Foundations", OrderIndex: 1, Tasks: []ai.TaskDraft{
+					{Title: "Syntax", EstimatedMinutes: 30}, {Title: "Types", EstimatedMinutes: 30}, {Title: "Maps", EstimatedMinutes: 30},
+				}},
+				{Title: "Concurrency", OrderIndex: 2, Tasks: []ai.TaskDraft{{Title: "Goroutines", EstimatedMinutes: 60}}},
+			},
+		},
+	}
+	fp.revise = func(req ai.ReviseRequest) ai.PlanRevision {
+		var ms []ai.RevMilestone
+		for _, m := range req.Current.Milestones {
+			rm := ai.RevMilestone{ID: m.ID, Title: m.Title, OrderIndex: m.OrderIndex}
+			for _, task := range m.Tasks {
+				rm.Tasks = append(rm.Tasks, ai.RevTask{ID: task.ID, Title: task.Title, EstimatedMinutes: task.EstimatedMinutes, Notes: task.Notes})
+			}
+			ms = append(ms, rm)
+		}
+		return ai.PlanRevision{Title: req.Current.Title, Description: req.Current.Description, Summary: "Kept the lessons.", Milestones: ms, WorkingDays: []string{"Wednesday"}}
+	}
+	c := newServer(t, fp)
+	c.login()
+
+	var plan service.PlanDetail
+	c.do("POST", "/ai/decompose-plan", map[string]any{
+		"prompt": "Learn Go", "start_date": "2026-03-02", "minutes_per_day": 60, "weekdays": ai.Workdays,
+	}, 201, &plan)
+
+	// A later client sync of the plan must not wipe the stored days.
+	c.do("POST", "/sync", service.SyncRequest{Changes: service.Changes{LearningPlans: []service.Plan{{
+		ID: plan.ID, Title: "Go", Description: plan.Description, TargetDate: plan.TargetDate, Status: "active",
+		CreatedAt: plan.CreatedAt, UpdatedAt: "2099-01-01T00:00:00.000Z",
+	}}}}, 200, nil)
+
+	var kept service.RevisionProposal
+	c.do("POST", "/ai/revise-plan", map[string]any{"plan_id": plan.ID, "instruction": "make it faster", "today": "2026-03-06"}, 200, &kept)
+	if fp.gotRevise.Weekdays != ai.Workdays || kept.Weekdays != ai.Workdays || kept.Revision.Weekdays != ai.Workdays {
+		t.Fatalf("weekdays not kept: request %d proposal %d revision %d", fp.gotRevise.Weekdays, kept.Weekdays, kept.Revision.Weekdays)
+	}
+	var after service.PlanDetail
+	c.do("POST", "/plans/"+plan.ID+"/apply-revision", map[string]any{
+		"revision": kept.Revision, "start_date": "2026-03-06", "minutes_per_day": 60,
+	}, 200, &after)
+	dates := scheduledDates(after)
+	// Nothing changed, so nothing moves: the plan as generated on weekdays.
+	if dates["Syntax"] != "2026-03-02" || dates["Types"] != "2026-03-02" || dates["Maps"] != "2026-03-03" || dates["Goroutines"] != "2026-03-04" {
+		t.Fatalf("kept weekdays: %+v", dates)
+	}
+
+	var changed service.RevisionProposal
+	c.do("POST", "/ai/revise-plan", map[string]any{"plan_id": plan.ID, "instruction": "I can only work on Wednesdays", "today": "2026-03-06"}, 200, &changed)
+	if changed.Weekdays != 4 {
+		t.Fatalf("weekdays = %d, want Wednesday", changed.Weekdays)
+	}
+	c.do("POST", "/plans/"+plan.ID+"/apply-revision", map[string]any{
+		"revision": changed.Revision, "start_date": "2026-03-06", "minutes_per_day": 60,
+	}, 200, &after)
+	// New days re-spread the plan onto them.
+	dates = scheduledDates(after)
+	if dates["Syntax"] != "2026-03-11" || dates["Types"] != "2026-03-11" || dates["Maps"] != "2026-03-18" || dates["Goroutines"] != "2026-03-25" {
+		t.Fatalf("wednesday only: %+v", dates)
+	}
+}
+
+func scheduledDates(plan service.PlanDetail) map[string]string {
+	out := map[string]string{}
+	for _, m := range plan.Milestones {
+		for _, task := range m.Tasks {
+			if task.ScheduledDate != nil {
+				out[task.Title] = *task.ScheduledDate
+			}
+		}
+	}
+	return out
 }
 
 func TestSessions(t *testing.T) {

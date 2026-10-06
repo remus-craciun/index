@@ -26,12 +26,14 @@ class AiRepository {
     required String startDate,
     String? targetDate,
     required int minutesPerDay,
+    int weekdays = 127,
   }) async {
     final json = await _api.decomposePlan(
       prompt: prompt,
       startDate: startDate,
       targetDate: targetDate,
       minutesPerDay: minutesPerDay,
+      weekdays: weekdays,
     );
     final remote = RemoteChanges.fromPlanDetail(json);
     await db.transaction(() => applyRemote(db, remote));

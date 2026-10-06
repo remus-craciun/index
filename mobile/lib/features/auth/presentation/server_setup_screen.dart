@@ -15,11 +15,31 @@ class ServerSetupScreen extends ConsumerStatefulWidget {
 }
 
 class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
-  late final _controller = TextEditingController(
-    text: ref.read(sessionControllerProvider.notifier).localDataServer() ?? '',
-  );
+  late final _controller = TextEditingController(text: _initialAddress());
   bool _busy = false;
   String? _error;
+
+  String _initialAddress() {
+    final session = ref.read(sessionControllerProvider.notifier);
+    return initialServerAddress(
+      stored: session.localDataServer(),
+      pageOrigin: embeddedServerOrigin(),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final session = ref.read(sessionControllerProvider.notifier);
+    if (shouldAutoConnectEmbeddedServer(
+      storedDataServer: session.localDataServer(),
+      pageOrigin: embeddedServerOrigin(),
+    )) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _connect();
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -41,7 +61,8 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
       final ok = await confirm(
         context,
         title: 'Switch server?',
-        message: 'This device holds data from $previous. Connecting to a different server removes it '
+        message:
+            'This device holds data from $previous. Connecting to a different server removes it '
             'from this device, including changes that were not synced yet.',
         action: 'Switch',
       );
@@ -75,11 +96,17 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
                 children: [
                   const Center(child: AppLogo()),
                   const SizedBox(height: 16),
-                  Text('Welcome to Index', style: theme.textTheme.headlineSmall, textAlign: TextAlign.center),
+                  Text(
+                    'Welcome to Index',
+                    style: theme.textTheme.headlineSmall,
+                    textAlign: TextAlign.center,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     'Connect to your server to get started. Enter its address below.',
-                    style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 32),
@@ -102,13 +129,18 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
                   const SizedBox(height: 8),
                   Text(
                     'IP addresses use http://, domains use https://. Type the scheme to override.',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   FilledButton(
                     onPressed: _busy ? null : _connect,
                     child: _busy
-                        ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                         : const Text('Connect'),
                   ),
                 ],

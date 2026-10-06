@@ -30,6 +30,7 @@ type RevisionProposal struct {
 	Summary       string          `json:"summary"`
 	Changes       []Change        `json:"changes"`
 	MinutesPerDay int             `json:"minutes_per_day"`
+	Weekdays      int             `json:"weekdays"`
 }
 
 type ReviseInput struct {
@@ -162,6 +163,9 @@ func (st planState) reconcile(rev ai.PlanRevision, start time.Time) (ai.PlanRevi
 	}
 	if out.Description == "" {
 		out.Description = st.plan.Description
+	}
+	if rev.Weekdays >= 1 && rev.Weekdays <= ai.AllWeekdays {
+		out.Weekdays = rev.Weekdays
 	}
 	if rev.MinutesPerDay != nil {
 		m := max(10, min(600, *rev.MinutesPerDay))
@@ -312,6 +316,7 @@ type placement struct {
 	repacked bool     // pending tasks were re-spread
 	from     time.Time
 	perDay   int
+	weekdays int
 }
 
 // structural reports whether a revision adds, removes, resizes or reorders
@@ -362,20 +367,25 @@ func (st planState) structural(rev ai.PlanRevision) bool {
 }
 
 // place works out every task's day and time after a reconciled revision,
-// starting at start with a daily budget of perDay minutes. Preview and apply
+// starting at start with a daily budget of perDay minutes, on the plan's
+// working days (the revision's, if it sets them). Preview and apply
 // share it, so what the learner sees is what gets stored.
 //
 //   - A task with a new date goes on that day.
 //   - Otherwise pending tasks keep their day, unless the revision changes the
-//     timeline (reschedule_from, minutes_per_day) or is structural: then they
+//     timeline (reschedule_from, minutes_per_day, working days) or is structural: then they
 //     are re-spread in plan order from the start (or reschedule_from), around
 //     the tasks fixed to a day.
 //   - A new start time gets an end time from the task's length (its current
 //     window, or estimated_minutes), and tasks given a time on the same day
 //     run one after another in plan order.
 func (st planState) place(rev ai.PlanRevision, start time.Time, perDay int) placement {
-	p := placement{from: start, perDay: perDay}
-	p.repacked = rev.RescheduleFrom != nil || rev.MinutesPerDay != nil || st.structural(rev)
+	p := placement{from: start, perDay: perDay, weekdays: int(st.plan.Weekdays)}
+	if rev.Weekdays != 0 {
+		p.weekdays = rev.Weekdays
+	}
+	p.repacked = rev.RescheduleFrom != nil || rev.MinutesPerDay != nil ||
+		p.weekdays != int(st.plan.Weekdays) || st.structural(rev)
 	if rev.RescheduleFrom != nil {
 		if d, err := timeutil.ParseDate(*rev.RescheduleFrom); err == nil && d.After(start) {
 			p.from = d
@@ -405,7 +415,7 @@ func (st planState) place(rev ai.PlanRevision, start time.Time, perDay int) plac
 			}
 		}
 	}
-	dates := ai.ScheduleAround(p.from, perDay, auto, booked)
+	dates := ai.ScheduleAround(p.from, perDay, auto, p.weekdays, booked)
 
 	type window struct{ start, end int }
 	timed := map[string][]window{} // day -> windows given out by this revision
@@ -593,6 +603,9 @@ func (st planState) respreadChange(out ai.PlanRevision, p placement) (Change, bo
 	}
 	detail := fmt.Sprintf("%d pending task%s re-spread from %s at up to %s a day",
 		moved, map[bool]string{true: "", false: "s"}[moved == 1], formatDay(timeutil.FormatDate(p.from)), formatMinutes(p.perDay))
+	if p.weekdays != ai.AllWeekdays {
+		detail += " on " + ai.DescribeWeekdays(p.weekdays)
+	}
 	if last != "" {
 		detail += ", ending " + formatDay(last)
 		if target := deref(st.plan.TargetDate); target != "" && last > target {
@@ -685,8 +698,9 @@ func (s *Service) RevisePlan(ctx context.Context, userID string, in ReviseInput)
 		return RevisionProposal{}, invalid("minutes_per_day must be between 10 and 600")
 	}
 
+	currentDays := int(st.plan.Weekdays)
 	rev, err := s.planner.RevisePlan(ctx, ai.ReviseRequest{
-		Instruction: instruction, Current: st.current(), Today: today, MinutesPerDay: perDay,
+		Instruction: instruction, Current: st.current(), Today: today, MinutesPerDay: perDay, Weekdays: currentDays,
 	})
 	if err != nil {
 		return RevisionProposal{}, err
@@ -695,6 +709,7 @@ func (s *Service) RevisePlan(ctx context.Context, userID string, in ReviseInput)
 	if err != nil {
 		return RevisionProposal{}, err
 	}
+	clean.Weekdays = ai.ResolveWeekdays(currentDays, instruction, rev.WorkingDays)
 	if clean.MinutesPerDay != nil {
 		perDay = *clean.MinutesPerDay
 	}
@@ -707,7 +722,7 @@ func (s *Service) RevisePlan(ctx context.Context, userID string, in ReviseInput)
 	if changes == nil {
 		changes = []Change{}
 	}
-	return RevisionProposal{Revision: clean, Summary: summary, Changes: changes, MinutesPerDay: perDay}, nil
+	return RevisionProposal{Revision: clean, Summary: summary, Changes: changes, MinutesPerDay: perDay, Weekdays: clean.Weekdays}, nil
 }
 
 // ApplyRevision stores a revision (normally a proposal from RevisePlan),
@@ -745,10 +760,10 @@ func (s *Service) ApplyRevision(ctx context.Context, userID, planID string, in A
 		placed := st.place(plan, start, perDay)
 		now := s.nowString()
 
-		if plan.Title != st.plan.Title || plan.Description != st.plan.Description {
+		if plan.Title != st.plan.Title || plan.Description != st.plan.Description || int64(placed.weekdays) != st.plan.Weekdays {
 			if err := q.UpdatePlan(ctx, sqlcgen.UpdatePlanParams{
 				ID: planID, UserID: userID, Title: plan.Title, Description: plan.Description,
-				TargetDate: st.plan.TargetDate, Status: st.plan.Status, UpdatedAt: now, ServerRev: rev,
+				TargetDate: st.plan.TargetDate, Status: st.plan.Status, Weekdays: int64(placed.weekdays), UpdatedAt: now, ServerRev: rev,
 			}); err != nil {
 				return err
 			}

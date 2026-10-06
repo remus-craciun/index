@@ -18,12 +18,21 @@ class PlanChange {
 /// What a follow-up request would do to a plan. [revision] is sent back
 /// unchanged to apply it.
 class RevisionProposal {
-  const RevisionProposal({required this.revision, required this.summary, required this.changes, required this.minutesPerDay});
+  const RevisionProposal({
+    required this.revision,
+    required this.summary,
+    required this.changes,
+    required this.minutesPerDay,
+    this.weekdays = 127,
+  });
 
   final Map<String, dynamic> revision;
   final String summary;
   final List<PlanChange> changes;
   final int minutesPerDay;
+
+  /// Monday = 1 … Sunday = 64. 127 means every day.
+  final int weekdays;
 
   factory RevisionProposal.fromJson(Map<String, dynamic> j) => RevisionProposal(
         revision: (j['revision'] as Map).cast<String, dynamic>(),
@@ -33,6 +42,7 @@ class RevisionProposal {
             .map(PlanChange.fromJson)
             .toList(),
         minutesPerDay: (j['minutes_per_day'] as num?)?.toInt() ?? 60,
+        weekdays: (j['weekdays'] as num?)?.toInt() ?? 127,
       );
 
   bool get isEmpty => changes.isEmpty;

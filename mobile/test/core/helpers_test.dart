@@ -22,15 +22,63 @@ void main() {
     });
   });
 
+  group('embedded server address', () {
+    test('stored address wins over the page origin', () {
+      expect(
+        initialServerAddress(
+          stored: 'http://192.168.1.5:8080',
+          pageOrigin: 'https://index.example.com',
+        ),
+        'http://192.168.1.5:8080',
+      );
+    });
+
+    test('page origin fills an empty field', () {
+      expect(
+        initialServerAddress(pageOrigin: 'https://index.example.com'),
+        'https://index.example.com',
+      );
+      expect(initialServerAddress(), '');
+    });
+
+    test('auto-connect only on the first launch of the embedded build', () {
+      expect(
+        shouldAutoConnectEmbeddedServer(
+          pageOrigin: 'https://index.example.com',
+        ),
+        isTrue,
+      );
+      expect(
+        shouldAutoConnectEmbeddedServer(
+          storedDataServer: 'https://index.example.com',
+          pageOrigin: 'https://index.example.com',
+        ),
+        isFalse,
+      );
+      expect(shouldAutoConnectEmbeddedServer(), isFalse);
+    });
+
+    test('dev and mobile builds have no embedded origin', () {
+      expect(embeddedServerOrigin(), isNull);
+    });
+  });
+
   group('time', () {
     test('formatStamp is fixed-width UTC millis', () {
-      expect(formatStamp(DateTime.utc(2026, 1, 2, 3, 4, 5, 6, 789)), '2026-01-02T03:04:05.006Z');
+      expect(
+        formatStamp(DateTime.utc(2026, 1, 2, 3, 4, 5, 6, 789)),
+        '2026-01-02T03:04:05.006Z',
+      );
     });
 
     test('editStamp is later than a future previous stamp', () {
       const future = '2999-01-01T00:00:00.000Z';
       expect(editStamp(future), '2999-01-01T00:00:00.001Z');
-      expect(editStamp('2000-01-01T00:00:00.000Z').compareTo('2000-01-01T00:00:00.000Z'), greaterThan(0));
+      expect(
+        editStamp('2000-01-01T00:00:00.000Z')
+            .compareTo('2000-01-01T00:00:00.000Z'),
+        greaterThan(0),
+      );
     });
 
     test('dateKey round-trips', () {

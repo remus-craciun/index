@@ -9,7 +9,7 @@ import (
 
 func TestSchedulePacksDailyBudget(t *testing.T) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	got := Schedule(start, 60, []int{30, 30, 30, 90, 10, 50, 5})
+	got := Schedule(start, 60, []int{30, 30, 30, 90, 10, 50, 5}, AllWeekdays)
 	want := []int{0, 0, 1, 2, 3, 3, 4} // day offsets
 	for i, d := range got {
 		if off := int(d.Sub(start).Hours() / 24); off != want[i] {
@@ -45,7 +45,7 @@ func TestValidateNormalisesDraft(t *testing.T) {
 func TestScheduleAroundSkipsBookedDays(t *testing.T) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	booked := map[string]int{"2026-01-01": 30, "2026-01-02": 60}
-	got := ScheduleAround(start, 60, []int{30, 30, 30}, booked)
+	got := ScheduleAround(start, 60, []int{30, 30, 30}, AllWeekdays, booked)
 	want := []int{0, 2, 2} // fills Jan 1 up to the budget, skips the full Jan 2
 	for i, d := range got {
 		if off := int(d.Sub(start).Hours() / 24); off != want[i] {
@@ -55,10 +55,7 @@ func TestScheduleAroundSkipsBookedDays(t *testing.T) {
 }
 
 func TestRevisePromptHasCalendar(t *testing.T) {
-	p, err := revisePrompt(ReviseRequest{Instruction: "move X to Friday", Today: "2026-10-06", MinutesPerDay: 60})
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := revisePrompt(ReviseRequest{Instruction: "move X to Friday", Today: "2026-10-06", MinutesPerDay: 60})
 	for _, want := range []string{"Today: 2026-10-06 (Tuesday)", "Fri 2026-10-09", "Learner's request: move X to Friday"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)
@@ -66,5 +63,68 @@ func TestRevisePromptHasCalendar(t *testing.T) {
 	}
 	if !strings.HasSuffix(strings.TrimSpace(p), "move X to Friday") {
 		t.Errorf("request should come last:\n%s", p)
+	}
+}
+
+func TestScheduleSkipsUnavailableWeekdays(t *testing.T) {
+	start := time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC) // Saturday
+	got := Schedule(start, 60, []int{30, 30, 30}, Workdays)
+	want := []string{"2026-01-05", "2026-01-05", "2026-01-06"}
+	for i, d := range got {
+		if got := d.Format(time.DateOnly); got != want[i] {
+			t.Errorf("task %d: %s, want %s", i, got, want[i])
+		}
+	}
+}
+
+func TestResolveWeekdaysKeepsCurrentUnlessTheRequestChangesThem(t *testing.T) {
+	const current = Workdays
+	if got := ResolveWeekdays(current, "make it more hands-on", []string{"Wednesday"}); got != current {
+		t.Fatalf("unrelated request changed days: %d", got)
+	}
+	if got := ResolveWeekdays(current, "make the Monday task shorter", nil); got != current {
+		t.Fatalf("mentioning a task's day changed the mask: %d", got)
+	}
+	if got := ResolveWeekdays(current, "I can only work on Wednesdays", []string{"Wednesday"}); got != 4 {
+		t.Fatalf("model days: got %d", got)
+	}
+	if got := ResolveWeekdays(current, "add Saturday", nil); got != current|32 {
+		t.Fatalf("add Saturday: got %d", got)
+	}
+	if got := ResolveWeekdays(current, "drop Fridays", nil); got != current&^16 {
+		t.Fatalf("drop Fridays: got %d", got)
+	}
+	if got := ResolveWeekdays(current, "switch to weekends", nil); got != 96 {
+		t.Fatalf("weekends: got %d", got)
+	}
+}
+
+func TestRevisePromptNamesCurrentDays(t *testing.T) {
+	got := revisePrompt(ReviseRequest{
+		Instruction: "only Saturdays", Today: "2026-03-05", MinutesPerDay: 45, Weekdays: Workdays,
+	})
+	for _, want := range []string{
+		"Days the learner can currently work: Monday, Tuesday, Wednesday, Thursday, Friday",
+		"Keep these days unless the request changes which days they can work.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestDecomposePromptNamesWorkingDays(t *testing.T) {
+	// Monday 2026-03-02 through Sunday 2026-03-08, Wednesdays only: one day.
+	got := decomposePrompt(DecomposeRequest{
+		Prompt: "Learn Go", StartDate: "2026-03-02", TargetDate: "2026-03-08",
+		MinutesPerDay: 60, Weekdays: 4,
+	})
+	for _, want := range []string{
+		"Days the learner can work: Wednesday",
+		"Available days: 1 (about 60 minutes in total)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt missing %q:\n%s", want, got)
+		}
 	}
 }

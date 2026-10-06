@@ -61,17 +61,22 @@ func TestLiveRevise(t *testing.T) {
 		{"skip today", "I can't study today", map[string]string{}, "2026-10-07", nil},
 		{"duration", "Make Channels take 2 hours", map[string]string{}, "null", map[string]int{"t5": 120}},
 		{"romanian", "Mută Goroutines la ora 10 dimineața", map[string]string{"t4": "null 10:00"}, "null", nil},
-		{"unsupported", "I can't study on weekends", nil, "", nil},
+		{"weekends off", "I can't study on weekends", nil, "", nil},
+		{"unsupported", "Remind me 15 minutes before each task", map[string]string{}, "null", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			rev, err := g.RevisePlan(context.Background(), ReviseRequest{Instruction: tc.request, Current: cur, Today: "2026-10-06", MinutesPerDay: 60})
+			rev, err := g.RevisePlan(context.Background(), ReviseRequest{Instruction: tc.request, Current: cur, Today: "2026-10-06", MinutesPerDay: 60, Weekdays: AllWeekdays})
 			if err != nil {
 				t.Fatal(err)
 			}
 			b, _ := json.Marshal(rev)
 			t.Logf("%s\n%s", tc.request, b)
+			days := ResolveWeekdays(AllWeekdays, tc.request, rev.WorkingDays)
+			if want := map[bool]int{true: Workdays, false: AllWeekdays}[tc.name == "weekends off"]; days != want {
+				t.Errorf("working days %v -> %d, want %d", rev.WorkingDays, days, want)
+			}
 			if tc.reschedule != "" && s(rev.RescheduleFrom) != tc.reschedule {
 				t.Errorf("reschedule_from = %s, want %s", s(rev.RescheduleFrom), tc.reschedule)
 			}

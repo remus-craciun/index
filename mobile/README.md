@@ -1,6 +1,6 @@
 # mobile
 
-Flutter client (Android for now). Everything works offline: the UI reads only from the local Drift database, and a background sync engine keeps it in step with the server.
+Flutter client (Android, and the web UI the server embeds). Everything works offline: the UI reads only from the local Drift database, and a background sync engine keeps it in step with the server.
 
 ## Run
 
@@ -10,6 +10,8 @@ dart run build_runner build        # after changing tables or @riverpod provider
 flutter run                        # needs an Android device/emulator (Android SDK)
 flutter run -d chrome              # web; enter localhost:8080 as the server
 ```
+
+The copy served by the Go server is a separate build. From the repo root, `scripts/build-web.sh` compiles it with `INDEX_SAME_ORIGIN=true` and copies it to `server/internal/webui/dist`. That build uses the page's own origin as the server, so opening the hosted site does not ask for an address. `flutter run -d chrome` leaves the flag off, because the page origin is then the Flutter dev server.
 
 On web, SQLite runs as WebAssembly. `web/sqlite3.wasm` and `web/drift_worker.js` come from the [drift release](https://github.com/simolus3/drift/releases) matching the `drift` version in `pubspec.lock`. Download both again whenever you upgrade drift.
 

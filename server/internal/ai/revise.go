@@ -46,6 +46,10 @@ type PlanRevision struct {
 	RescheduleFrom *string        `json:"reschedule_from,omitempty"`
 	Milestones     []RevMilestone `json:"milestones"`
 	Summary        string         `json:"summary,omitempty"`
+	// Weekdays is the mask to schedule on after this revision. The model
+	// fills WorkingDays; the service resolves that into Weekdays.
+	Weekdays    int      `json:"weekdays,omitempty"`
+	WorkingDays []string `json:"working_days,omitempty"`
 }
 
 // CurrentTask / CurrentMilestone / CurrentPlan describe the plan as it is,
@@ -80,6 +84,7 @@ type ReviseRequest struct {
 	Current       CurrentPlan
 	Today         string // YYYY-MM-DD, the learner's local date
 	MinutesPerDay int
+	Weekdays      int // bitmask the learner can currently work; 0 means every day
 }
 
 // calendarDays is how far ahead the prompt lists dates with their weekdays,
@@ -119,6 +124,9 @@ Current tasks show their day (scheduled_date) and, if set, their time of day (st
   order, day by day from that date: "push everything back a week" = the date 7 days after today,
   "skip today" or "not today" = tomorrow, "start next Monday" = that Monday, "catch me up" or
   "reschedule everything" = today.
+- working_days: the weekdays the learner can work after this change, as English day names (Monday
+  … Sunday). Keep the current days unless the request changes which days they can work ("no tasks
+  on weekends", "add Saturday"); the app then re-spreads pending tasks onto those days.
 - minutes_per_day: null keeps the daily time budget. A number changes it ("only 30 minutes a day",
   "make it lighter", "spread it over more weeks" = less than now); the app then re-spreads pending
   tasks.
@@ -132,9 +140,9 @@ Summary
 - Fill it in last: one to three short sentences telling the learner what you changed. Describe only
   changes that are in your output, naming days ("Fri 9 Oct") and times ("19:00"). Don't mention
   field names.
-- If part of the request can't be done with these fields (for example repeating days off like "no
-  tasks on weekends", reminders, the target date, or anything about the current time of day), change
-  nothing for that part and say plainly that it wasn't done.`
+- If part of the request can't be done with these fields (for example reminders, the target date,
+  or anything about the current time of day), change nothing for that part and say plainly that it
+  wasn't done.`
 
 var revisionTaskSchema = &genai.Schema{
 	Type: genai.TypeObject,
@@ -159,6 +167,15 @@ var revisionSchema = &genai.Schema{
 		"description": {Type: genai.TypeString},
 		"minutes_per_day": {Type: genai.TypeInteger, Nullable: ptr(true), Minimum: ptr(10.0), Maximum: ptr(600.0),
 			Description: "New daily time budget in minutes; null keeps it."},
+		"working_days": {
+			Type:        genai.TypeArray,
+			MinItems:    ptr[int64](1),
+			Description: "Weekdays the learner can work after this request. Same as the current days unless the request changes them.",
+			Items: &genai.Schema{
+				Type: genai.TypeString,
+				Enum: []string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"},
+			},
+		},
 		"reschedule_from": {Type: genai.TypeString, Nullable: ptr(true),
 			Description: "YYYY-MM-DD to re-spread pending tasks from that day; null keeps their days."},
 		"milestones": {
@@ -178,17 +195,14 @@ var revisionSchema = &genai.Schema{
 		},
 		"summary": {Type: genai.TypeString, Description: "What changed, for the learner. Written last."},
 	},
-	Required:         []string{"title", "description", "minutes_per_day", "reschedule_from", "milestones", "summary"},
-	PropertyOrdering: []string{"title", "description", "minutes_per_day", "reschedule_from", "milestones", "summary"},
+	Required:         []string{"title", "description", "working_days", "minutes_per_day", "reschedule_from", "milestones", "summary"},
+	PropertyOrdering: []string{"title", "description", "working_days", "minutes_per_day", "reschedule_from", "milestones", "summary"},
 }
 
 // revisePrompt lays out the request: the plan first, then the dates the
 // model needs, then the learner's request last so it is read in full context.
-func revisePrompt(req ReviseRequest) (string, error) {
-	current, err := json.MarshalIndent(req.Current, "", "  ")
-	if err != nil {
-		return "", err
-	}
+func revisePrompt(req ReviseRequest) string {
+	current, _ := json.MarshalIndent(req.Current, "", "  ") // plain structs; can't fail
 	var b strings.Builder
 	fmt.Fprintf(&b, "Current plan:\n%s\n\n", current)
 	if today, err := time.Parse(time.DateOnly, req.Today); err == nil {
@@ -206,18 +220,16 @@ func revisePrompt(req ReviseRequest) (string, error) {
 	} else {
 		fmt.Fprintf(&b, "Today: %s\n", req.Today)
 	}
-	fmt.Fprintf(&b, "Daily time budget: %d minutes\n\n", req.MinutesPerDay)
+	fmt.Fprintf(&b, "Daily time budget: %d minutes\n", req.MinutesPerDay)
+	fmt.Fprintf(&b, "Days the learner can currently work: %s\n", DescribeWeekdays(req.Weekdays))
+	fmt.Fprintf(&b, "Keep these days unless the request changes which days they can work.\n\n")
 	fmt.Fprintf(&b, "Learner's request: %s\n", req.Instruction)
-	return b.String(), nil
+	return b.String()
 }
 
 func (g *Gemini) RevisePlan(ctx context.Context, req ReviseRequest) (PlanRevision, error) {
-	prompt, err := revisePrompt(req)
-	if err != nil {
-		return PlanRevision{}, err
-	}
 	var out PlanRevision
-	if err := g.generate(ctx, reviseInstruction, prompt, revisionSchema, &out); err != nil {
+	if err := g.generate(ctx, reviseInstruction, revisePrompt(req), revisionSchema, &out); err != nil {
 		return PlanRevision{}, err
 	}
 	if len(out.Milestones) == 0 {
