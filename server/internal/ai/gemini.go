@@ -10,7 +10,8 @@ import (
 	"google.golang.org/genai"
 )
 
-const callTimeout = 60 * time.Second
+// callTimeout stays under the 90s timeout on the AI routes.
+const callTimeout = 80 * time.Second
 
 const decomposeInstruction = `You are an expert curriculum designer. Turn the learner's goal into a
 practical, progressive learning plan.

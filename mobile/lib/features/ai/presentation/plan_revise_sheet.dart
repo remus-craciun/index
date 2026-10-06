@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/ui/format.dart';
 import '../../../core/ui/widgets.dart';
 import '../../repositories.dart';
 import '../domain/revision.dart';
@@ -183,11 +182,6 @@ class _PlanReviseSheetState extends ConsumerState<PlanReviseSheet> {
                 const Text('Nothing would change.')
               else
                 for (final c in p.changes) _ChangeRow(change: c),
-              const SizedBox(height: 8),
-              Text(
-                'Pending tasks will be re-spread from today at about ${formatMinutes(p.minutesPerDay)} a day.',
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
             ],
           ),
         ),
@@ -244,6 +238,7 @@ class _ChangeRow extends StatelessWidget {
       'added' => (Icons.add_circle_outline, Colors.green.shade600),
       'removed' => (Icons.remove_circle_outline, scheme.error),
       'moved' => (Icons.swap_vert, scheme.tertiary),
+      'rescheduled' => (Icons.schedule, scheme.tertiary),
       _ => (Icons.edit_outlined, scheme.primary),
     };
     final what = switch (change.kind) { 'milestone' => 'Milestone', 'plan' => 'Plan', _ => 'Task' };

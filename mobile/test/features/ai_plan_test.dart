@@ -64,6 +64,7 @@ class SlowAiAdapter implements HttpClientAdapter {
     'changes': [
       {'kind': 'task', 'action': 'removed', 'title': 'Goroutines and channels'},
       {'kind': 'task', 'action': 'added', 'title': 'Build a worker pool', 'detail': 'in Foundations'},
+      {'kind': 'task', 'action': 'rescheduled', 'title': 'Basics', 'detail': 'at 19:00–19:45'},
     ],
     'revision': {'title': 'Distributed Go', 'description': 'Six weeks', 'milestones': []},
   };
@@ -168,7 +169,9 @@ void main() {
     expect(adapter.revisions, ['Make it more hands-on']);
     expect(find.text('Swapped the intro task for a hands-on project.'), findsOneWidget);
     expect(find.textContaining('Build a worker pool'), findsOneWidget);
-    expect(find.textContaining('re-spread from today at about 45m a day'), findsOneWidget);
+    // Schedule changes come from the server; the sheet no longer claims a re-spread.
+    expect(find.textContaining('at 19:00–19:45'), findsOneWidget);
+    expect(find.textContaining('re-spread from today'), findsNothing);
     expect(adapter.applied, 0, reason: 'nothing stored before Apply');
 
     await tester.tap(find.text('Apply'));

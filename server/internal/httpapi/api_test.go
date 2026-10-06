@@ -539,6 +539,7 @@ func TestRevisePlan(t *testing.T) {
 		"plan updated Go, faster": true, "milestone updated Basics": true, "task updated Maps and slices": true,
 		"task added Structs": true, "milestone added Testing": true, "task added Table tests": true,
 		"task removed Types": true, "milestone removed Concurrency": true,
+		"plan rescheduled Go, faster": true, // adding tasks re-spreads the plan
 	}
 	for _, ch := range prop.Changes {
 		key := ch.Kind + " " + ch.Action + " " + ch.Title
@@ -611,6 +612,177 @@ func TestRevisePlan(t *testing.T) {
 	}
 	if !stillThere {
 		t.Fatal("completed task was removed by a revision")
+	}
+}
+
+// echo is the model's answer that keeps the current plan as it is; edit
+// changes tasks in it by title.
+func echo(cur ai.CurrentPlan, edit func(*ai.RevTask)) ai.PlanRevision {
+	rev := ai.PlanRevision{Title: cur.Title, Description: cur.Description}
+	for _, m := range cur.Milestones {
+		rm := ai.RevMilestone{ID: m.ID, Title: m.Title, OrderIndex: m.OrderIndex}
+		for _, t := range m.Tasks {
+			rt := ai.RevTask{ID: t.ID, Title: t.Title, EstimatedMinutes: t.EstimatedMinutes, Notes: t.Notes}
+			edit(&rt)
+			rm.Tasks = append(rm.Tasks, rt)
+		}
+		rev.Milestones = append(rev.Milestones, rm)
+	}
+	return rev
+}
+
+func TestReviseSchedule(t *testing.T) {
+	fp := &fakePlanner{
+		plan: ai.PlanDraft{
+			Title: "Go",
+			Milestones: []ai.MilestoneDraft{
+				{Title: "Foundations", OrderIndex: 1, Tasks: []ai.TaskDraft{
+					{Title: "Syntax", EstimatedMinutes: 30}, {Title: "Types", EstimatedMinutes: 30}, {Title: "Maps", EstimatedMinutes: 30},
+				}},
+				{Title: "Concurrency", OrderIndex: 2, Tasks: []ai.TaskDraft{{Title: "Goroutines", EstimatedMinutes: 60}}},
+			},
+		},
+	}
+	c := newServer(t, fp)
+	c.login()
+	var plan service.PlanDetail
+	c.do("POST", "/ai/decompose-plan", map[string]any{"prompt": "Learn Go", "start_date": "2026-03-02", "minutes_per_day": 60}, 201, &plan)
+
+	str := func(s string) *string { return &s }
+	revise := func(edit func(*ai.RevTask), whole func(*ai.PlanRevision)) service.RevisionProposal {
+		t.Helper()
+		fp.revise = func(req ai.ReviseRequest) ai.PlanRevision {
+			rev := echo(req.Current, edit)
+			if whole != nil {
+				whole(&rev)
+			}
+			return rev
+		}
+		var prop service.RevisionProposal
+		c.do("POST", "/ai/revise-plan", map[string]any{"plan_id": plan.ID, "instruction": "x", "today": "2026-03-02"}, 200, &prop)
+		return prop
+	}
+	changes := func(prop service.RevisionProposal) map[string]string {
+		out := map[string]string{}
+		for _, ch := range prop.Changes {
+			out[ch.Kind+" "+ch.Action+" "+ch.Title] = ch.Detail
+		}
+		return out
+	}
+	apply := func(prop service.RevisionProposal) map[string]service.Task {
+		t.Helper()
+		var after service.PlanDetail
+		c.do("POST", "/plans/"+plan.ID+"/apply-revision", map[string]any{
+			"revision": prop.Revision, "start_date": "2026-03-02", "minutes_per_day": prop.MinutesPerDay,
+		}, 200, &after)
+		byTitle := map[string]service.Task{}
+		for _, m := range after.Milestones {
+			for _, tk := range m.Tasks {
+				byTitle[tk.Title] = tk
+			}
+		}
+		return byTitle
+	}
+	slot := func(tk service.Task) string {
+		d := func(s *string) string {
+			if s == nil {
+				return "-"
+			}
+			return *s
+		}
+		return d(tk.ScheduledDate) + " " + d(tk.StartTime) + " " + d(tk.EndTime)
+	}
+
+	// The model sees times as well as days.
+	revise(func(*ai.RevTask) {}, nil)
+	if got := fp.gotRevise.Current.Milestones[0].Tasks[0].ScheduledDate; got != "2026-03-02" {
+		t.Fatalf("model should see scheduled dates, got %q", got)
+	}
+
+	// Single-task edits: a time, a day and a time; nothing else moves.
+	prop := revise(func(rt *ai.RevTask) {
+		switch rt.Title {
+		case "Goroutines":
+			rt.NewStartTime = str("9:00")
+		case "Maps":
+			rt.NewDate, rt.NewStartTime = str("2026-03-06"), str("7pm")
+		}
+	}, nil)
+	got := changes(prop)
+	if len(got) != 2 || got["task rescheduled Goroutines"] != "at 09:00–10:00" || got["task rescheduled Maps"] != "on Fri 6 Mar, at 19:00–19:30" {
+		t.Fatalf("time edits preview: %v", got)
+	}
+	tasks := apply(prop)
+	if slot(tasks["Goroutines"]) != "2026-03-04 09:00 10:00" || slot(tasks["Maps"]) != "2026-03-06 19:00 19:30" ||
+		slot(tasks["Syntax"]) != "2026-03-02 - -" || slot(tasks["Types"]) != "2026-03-02 - -" {
+		t.Fatalf("after time edits: goroutines=%s maps=%s syntax=%s types=%s", slot(tasks["Goroutines"]),
+			slot(tasks["Maps"]), slot(tasks["Syntax"]), slot(tasks["Types"]))
+	}
+
+	// "Everything at 7pm": same-day tasks run back to back. Bad values are
+	// dropped: a time that isn't one, a date in the past.
+	prop = revise(func(rt *ai.RevTask) {
+		rt.NewStartTime = str("19:00")
+		if rt.Title == "Goroutines" {
+			rt.NewStartTime, rt.NewDate = str("25:00"), str("2025-03-03")
+		}
+	}, nil)
+	tasks = apply(prop)
+	if slot(tasks["Syntax"]) != "2026-03-02 19:00 19:30" || slot(tasks["Types"]) != "2026-03-02 19:30 20:00" ||
+		slot(tasks["Goroutines"]) != "2026-03-04 09:00 10:00" {
+		t.Fatalf("after 7pm: syntax=%s types=%s goroutines=%s", slot(tasks["Syntax"]), slot(tasks["Types"]), slot(tasks["Goroutines"]))
+	}
+
+	// A longer task keeps its start and gets a longer window; "none" clears a time.
+	prop = revise(func(rt *ai.RevTask) {
+		if rt.Title == "Goroutines" {
+			rt.NewStartTime = str("none")
+		}
+		if rt.Title == "Types" {
+			rt.EstimatedMinutes = 45
+		}
+	}, nil)
+	tasks = apply(prop)
+	if tasks["Goroutines"].StartTime != nil || tasks["Goroutines"].EndTime != nil || *tasks["Types"].EndTime != "20:15" {
+		t.Fatalf("after clear/resize: goroutines=%s types=%s", slot(tasks["Goroutines"]), slot(tasks["Types"]))
+	}
+
+	// Pushing the plan back re-spreads pending tasks but keeps their times.
+	prop = revise(func(*ai.RevTask) {}, func(rev *ai.PlanRevision) { rev.RescheduleFrom = str("2026-03-09") })
+	if d := changes(prop)["plan rescheduled Go"]; !strings.Contains(d, "from Mon 9 Mar") {
+		t.Fatalf("push back preview: %v", changes(prop))
+	}
+	tasks = apply(prop)
+	for _, title := range []string{"Syntax", "Types", "Maps", "Goroutines"} {
+		if d := *tasks[title].ScheduledDate; d < "2026-03-09" {
+			t.Fatalf("%s not pushed back: %s", title, d)
+		}
+	}
+	if *tasks["Syntax"].StartTime != "19:00" {
+		t.Fatalf("push back lost the time: %s", slot(tasks["Syntax"]))
+	}
+
+	// A revision without the schedule fields (an older client) moves nothing.
+	var before service.PlanDetail
+	c.do("GET", "/plans/"+plan.ID, nil, 200, &before)
+	legacy := map[string]any{"title": "Go", "description": "", "milestones": []any{}}
+	var ms []any
+	for _, m := range before.Milestones {
+		var ts []any
+		for _, tk := range m.Tasks {
+			ts = append(ts, map[string]any{"id": tk.ID, "title": tk.Title, "estimated_minutes": *tk.EstimatedMinutes, "notes": tk.Notes})
+		}
+		ms = append(ms, map[string]any{"id": m.ID, "title": m.Title, "order_index": m.OrderIndex, "tasks": ts})
+	}
+	legacy["milestones"] = ms
+	var after service.PlanDetail
+	c.do("POST", "/plans/"+plan.ID+"/apply-revision", map[string]any{"revision": legacy, "start_date": "2026-03-02"}, 200, &after)
+	for i, m := range after.Milestones {
+		for j, tk := range m.Tasks {
+			if b := before.Milestones[i].Tasks[j]; slot(tk) != slot(b) {
+				t.Fatalf("legacy revision moved %s: %s -> %s", tk.Title, slot(b), slot(tk))
+			}
+		}
 	}
 }
 
